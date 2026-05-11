@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Local Roam-Style Notes</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="panel">
+      <div class="section">
+        <h1>Local Graph Notes</h1>
+        <div class="muted">Roam-style, desktop local file storage</div>
+      </div>
+      <div class="section">
+        <h2>Create / Open Page</h2>
+        <div class="row">
+          <input id="newPageInput" placeholder="Page title" />
+          <button id="newPageBtn">Open</button>
+        </div>
+      </div>
+      <div class="section">
+        <h2>Global Search</h2>
+        <input id="searchInput" class="search-input" placeholder="Search pages + blocks" />
+        <div id="searchResults" class="search-results"></div>
+      </div>
+      <div class="section">
+        <h2>Pages</h2>
+        <div id="tagFilters" style="margin-bottom:8px;"></div>
+        <ul id="pagesList" class="pages"></ul>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="controls">
+        <div class="menu-wrap">
+          <button id="hamburgerBtn" class="hamburger-btn" title="Menu" aria-label="Open menu" aria-expanded="false">☰</button>
+          <div id="hamburgerMenu" class="menu-dropdown hidden">
+            <button id="addBlockBtn">+ New block</button>
+            <button id="newDailyBtn">Open Today</button>
+            <button id="viewEditorBtn">Editor</button>
+            <button id="viewGraphBtn">Graph</button>
+            <button id="viewSplitBtn">Side by Side</button>
+            <button id="toggleLeftSidebarBtn" title="Toggle left sidebar">Left Sidebar</button>
+            <button id="toggleRightSidebarBtn" title="Toggle right sidebar">Right Sidebar</button>
+            <button id="themeToggleBtn">Theme: Dark</button>
+            <button id="deletePageBtn" class="danger">Delete Page</button>
+            <div class="menu-divider"></div>
+            <div class="menu-tip-item"><span class="kbd">Enter</span>new sibling</div>
+            <div class="menu-tip-item"><span class="kbd">Tab</span>indent</div>
+            <div class="menu-tip-item"><span class="kbd">Shift+Tab</span>outdent</div>
+            <div class="menu-tip-item"><span class="kbd">Backspace on empty</span>delete block</div>
+            <div class="menu-tip-item"><span class="kbd">Ctrl+B/I/H</span>format selection</div>
+            <div class="menu-tip-item"><span class="kbd">/</span>slash commands</div>
+            <div class="menu-tip-item"><span class="kbd">[[Page]]</span>wiki links</div>
+            <div class="menu-tip-item"><span class="kbd">((</span>block reference search</div>
+            <div class="menu-tip-item"><span class="kbd">Ctrl+F</span>global search</div>
+            <div class="menu-tip-item"><span class="kbd">Ctrl+N</span>new page from selection</div>
+          </div>
+        </div>
+      </div>
+      <div class="title-wrap"><input id="pageTitle" class="page-title" /></div>
+      <div class="row" style="margin-bottom:8px; gap:8px;">
+        <div id="tagAddForm" class="hidden" style="display:flex; gap:8px; flex:1;">
+          <input id="newTagInput" placeholder="Write tag (work or #work)" />
+          <button id="saveNewTagBtn">Save</button>
+          <button id="cancelNewTagBtn">Cancel</button>
+        </div>
+      </div>
+      <div id="pageTagsList" style="margin-bottom:8px;"></div>
+      <div class="muted" id="storageMeta" style="margin-bottom:8px;"></div>
+      <div id="workspace" class="workspace view-editor">
+        <div id="blocks" class="blocks"></div>
+        <div id="graphView" class="graph-view hidden">
+          <div class="graph-toolbar" aria-label="Graph visualization controls">
+            <div class="graph-control-group graph-mode-control" role="group" aria-label="Graph scope">
+              <button id="graphModeGlobalBtn" class="graph-toggle active-view" type="button">Global</button>
+              <button id="graphModeLocalBtn" class="graph-toggle" type="button">Local</button>
+              <label class="graph-field graph-depth-field" title="Local graph depth">
+                Depth
+                <select id="graphLocalDepth">
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                </select>
+              </label>
+            </div>
+            <div class="graph-control-group">
+              <input id="graphSearchInput" class="graph-search" placeholder="Filter pages" aria-label="Filter graph pages" />
+              <select id="graphTagFilter" class="graph-select" aria-label="Filter graph by tag">
+                <option value="">All tags</option>
+              </select>
+              <label class="graph-check"><input id="graphHideOrphans" type="checkbox" /> Hide orphans</label>
+            </div>
+            <div class="graph-control-group graph-local-options">
+              <label class="graph-check"><input id="graphShowBacklinks" type="checkbox" checked /> Backlinks</label>
+              <label class="graph-check"><input id="graphShowOutgoing" type="checkbox" checked /> Outgoing</label>
+            </div>
+            <div class="graph-control-group">
+              <label class="graph-field">
+                Style
+                <select id="graphStyleMode">
+                  <option value="current">Current</option>
+                  <option value="roam-original">Original Roam</option>
+                </select>
+              </label>
+              <label class="graph-field">
+                Labels
+                <select id="graphLabelMode">
+                  <option value="smart">Smart</option>
+                  <option value="always">Always</option>
+                  <option value="hover">Hover</option>
+                </select>
+              </label>
+              <label class="graph-field">
+                Layout
+                <select id="graphLayoutMode">
+                  <option value="force">Force</option>
+                  <option value="radial">Radial</option>
+                </select>
+              </label>
+            </div>
+            <div class="graph-control-group">
+              <button id="graphFitBtn" class="graph-action-btn" type="button">Fit</button>
+              <button id="graphFitCurrentBtn" class="graph-action-btn" type="button">Current</button>
+              <button id="graphResetPinsBtn" class="graph-action-btn" type="button">Reset Pins</button>
+            </div>
+          </div>
+          <div class="graph-controls" aria-label="Graph zoom controls">
+            <button id="graphZoomOutBtn" class="graph-zoom-btn" title="Zoom out" aria-label="Zoom out">&minus;</button>
+            <span id="graphZoomLevel" class="graph-zoom-level">100%</span>
+            <button id="graphZoomInBtn" class="graph-zoom-btn" title="Zoom in" aria-label="Zoom in">+</button>
+            <button id="graphZoomResetBtn" class="graph-zoom-reset" title="Reset zoom and position">Reset</button>
+          </div>
+          <svg id="graphSvg" class="graph-svg" viewBox="0 0 900 560" preserveAspectRatio="xMidYMid meet"></svg>
+          <div id="graphInspector" class="graph-inspector hidden" aria-live="polite"></div>
+          <div id="graphLegend" class="graph-legend"></div>
+        </div>
+      </div>
+    </main>
+
+    <aside class="panel right">
+      <div class="section">
+        <h2>Backlinks</h2>
+        <div class="muted">Blocks from other pages linking to this page</div>
+      </div>
+      <div class="section backlinks" id="backlinks"></div>
+      <div class="section">
+        <div id="auditLog" class="audit-log"></div>
+      </div>
+      <div class="section">
+        <button id="exportBtn">Export JSON</button>
+        <button id="importBtn">Import JSON</button>
+        <button id="resetBtn" class="danger">Reset All</button>
+        <input id="importFile" type="file" accept="application/json" style="display:none" />
+      </div>
+    </aside>
+  </div>
+
+  <script defer src="./renderer.js"></script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+

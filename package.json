@@ -1,0 +1,14 @@
+{
+  "name": "local-roam-desktop",
+  "version": "1.0.0",
+  "description": "Local-only Roam-style notes desktop app",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^37.2.0"
+  }
+}
