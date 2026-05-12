@@ -21,11 +21,6 @@
         </div>
       </div>
       <div class="section">
-        <h2>Global Search</h2>
-        <input id="searchInput" class="search-input" placeholder="Search pages + blocks" />
-        <div id="searchResults" class="search-results"></div>
-      </div>
-      <div class="section">
         <h2>Pages</h2>
         <div id="tagFilters" style="margin-bottom:8px;"></div>
         <ul id="pagesList" class="pages"></ul>
@@ -34,6 +29,11 @@
 
     <main class="main">
       <div class="controls">
+        <button id="backPageBtn" class="back-page-btn" type="button" title="Go back to previous page" aria-label="Go back to previous page" disabled>&larr;</button>
+        <div class="top-search" role="search">
+          <input id="searchInput" class="search-input" placeholder="Search pages + blocks" aria-label="Global search" />
+          <div id="searchResults" class="search-results"></div>
+        </div>
         <div class="menu-wrap">
           <button id="hamburgerBtn" class="hamburger-btn" title="Menu" aria-label="Open menu" aria-expanded="false">☰</button>
           <div id="hamburgerMenu" class="menu-dropdown hidden">
@@ -45,6 +45,7 @@
             <button id="toggleLeftSidebarBtn" title="Toggle left sidebar">Left Sidebar</button>
             <button id="toggleRightSidebarBtn" title="Toggle right sidebar">Right Sidebar</button>
             <button id="themeToggleBtn">Theme: Dark</button>
+            <button id="backupMenuBtn">Backup Notes</button>
             <button id="deletePageBtn" class="danger">Delete Page</button>
             <div class="menu-divider"></div>
             <div class="menu-tip-item"><span class="kbd">Enter</span>new sibling</div>
@@ -72,6 +73,9 @@
       <div class="muted" id="storageMeta" style="margin-bottom:8px;"></div>
       <div id="workspace" class="workspace view-editor">
         <div id="blocks" class="blocks"></div>
+        <div id="linkedRefsSection" class="linked-refs-section">
+          <div id="backlinks"></div>
+        </div>
         <div id="graphView" class="graph-view hidden">
           <div class="graph-toolbar" aria-label="Graph visualization controls">
             <div class="graph-control-group graph-mode-control" role="group" aria-label="Graph scope">
@@ -141,15 +145,11 @@
 
     <aside class="panel right">
       <div class="section">
-        <h2>Backlinks</h2>
-        <div class="muted">Blocks from other pages linking to this page</div>
-      </div>
-      <div class="section backlinks" id="backlinks"></div>
-      <div class="section">
         <div id="auditLog" class="audit-log"></div>
       </div>
       <div class="section">
         <button id="exportBtn">Export JSON</button>
+        <button id="backupBtn">Backup Notes</button>
         <button id="importBtn">Import JSON</button>
         <button id="resetBtn" class="danger">Reset All</button>
         <input id="importFile" type="file" accept="application/json" style="display:none" />

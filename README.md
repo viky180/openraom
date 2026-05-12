@@ -13,6 +13,7 @@ A lightweight Roam Research-inspired app for **personal local use only**.
 - **Daily note auto-template** for new date pages (e.g., `YYYY-MM-DD`)
 - Daily note page shortcut
 - JSON export/import backup
+- Manual **Backup Notes** action saved to `C:\Users\viky1\OneDrive\Documents`
 - **Desktop file storage** (Electron app data file)
 
 ## Tech
@@ -32,11 +33,27 @@ npm install
 npm start
 ```
 
+To use the same app in Google Chrome:
+
+```bash
+npm run web
+```
+
+Then open:
+
+```text
+http://127.0.0.1:3100
+```
+
 ## Data storage
 
 In desktop mode, data is saved to a local JSON file:
 
-- Windows: `%APPDATA%/local-roam-desktop/notes-data.json` (actual resolved path is shown inside the app)
+- Windows: `C:\Users\viky1\Downloads\notes_roam\notes-data.json`
+
+Manual backups are saved as timestamped JSON files in:
+
+- Windows: `C:\Users\viky1\OneDrive\Documents`
 
 ## Keyboard shortcuts
 

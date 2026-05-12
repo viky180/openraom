@@ -1,5 +1,6 @@
 const STORAGE_KEY = 'local_roam_style_v1';
     const HAS_DESKTOP_STORAGE = typeof window.storageAPI !== 'undefined';
+    const HAS_SERVER_STORAGE = !HAS_DESKTOP_STORAGE && /^https?:$/.test(window.location.protocol);
 
     function uid() { return 'b_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8); }
     function todayTitle() { return new Date().toISOString().slice(0, 10); }
@@ -81,6 +82,11 @@ const STORAGE_KEY = 'local_roam_style_v1';
           if (!res?.ok) throw new Error(res?.error || 'desktop load failed');
           return sanitizeLoadedData(res.data);
         }
+        if (HAS_SERVER_STORAGE) {
+          const res = await fetch('/api/storage/load', { cache: 'no-store' }).then(r => r.json());
+          if (!res?.ok) throw new Error(res?.error || 'server load failed');
+          return sanitizeLoadedData(res.data);
+        }
         const raw = localStorage.getItem(STORAGE_KEY);
         return raw ? sanitizeLoadedData(JSON.parse(raw)) : defaultData();
       } catch (e) {
@@ -92,11 +98,14 @@ const STORAGE_KEY = 'local_roam_style_v1';
     let state = defaultData();
     let pendingFocus = null;
     let pendingFocusOffset = null;
+    let storageReady = false;
     let zoomedBlockId = null;
     let selectedBlockIds = new Set();
     let lastSelectedBlockId = null;
     let currentTagFilter = null;
     let currentView = 'editor';
+    let searchResultsCollapsed = false;
+    let pageBackStack = [];
     let uiState = { leftCollapsed: true, rightCollapsed: true };
     let leftSidebarCloseTimer = null;
     const GRAPH_WIDTH = 900;
@@ -506,11 +515,24 @@ const STORAGE_KEY = 'local_roam_style_v1';
     let saveInFlight = false;
     let saveRequestedWhileInFlight = false;
 
-    async function persistNow() {
+    async function persistNow(options = {}) {
+      if (!storageReady) {
+        console.warn('Skipped save before storage finished loading');
+        return;
+      }
       try {
         if (HAS_DESKTOP_STORAGE) {
-          const res = await window.storageAPI.save(state);
+          const res = await window.storageAPI.save(state, options);
           if (!res?.ok) throw new Error(res?.error || 'desktop save failed');
+          return;
+        }
+        if (HAS_SERVER_STORAGE) {
+          const res = await fetch('/api/storage/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: state, options })
+          }).then(r => r.json());
+          if (!res?.ok) throw new Error(res?.error || 'server save failed');
           return;
         }
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -519,7 +541,7 @@ const STORAGE_KEY = 'local_roam_style_v1';
       }
     }
 
-    async function flushSave() {
+    async function flushSave(options = {}) {
       if (saveInFlight) {
         saveRequestedWhileInFlight = true;
         return;
@@ -527,7 +549,7 @@ const STORAGE_KEY = 'local_roam_style_v1';
       saveInFlight = true;
       do {
         saveRequestedWhileInFlight = false;
-        await persistNow();
+        await persistNow(options);
       } while (saveRequestedWhileInFlight);
       saveInFlight = false;
     }
@@ -540,8 +562,8 @@ const STORAGE_KEY = 'local_roam_style_v1';
       }, SAVE_DEBOUNCE_MS);
     }
 
-    async function saveData() {
-      await flushSave();
+    async function saveData(options = {}) {
+      await flushSave(options);
     }
 
     function normalizeTag(tag) {
@@ -590,9 +612,39 @@ const STORAGE_KEY = 'local_roam_style_v1';
       return state.pages[clean];
     }
 
-    async function setCurrentPage(title) {
+    function prunePageBackStack() {
+      pageBackStack = pageBackStack.filter(title => title && title !== state.currentPage && Boolean(state.pages[title]));
+    }
+
+    function renderBackButtonState() {
+      const btn = document.getElementById('backPageBtn');
+      if (!btn) return;
+      prunePageBackStack();
+      const previousPage = pageBackStack[pageBackStack.length - 1] || '';
+      btn.disabled = !previousPage;
+      btn.title = previousPage ? `Go back to ${previousPage}` : 'No previous page';
+      btn.setAttribute('aria-label', previousPage ? `Go back to ${previousPage}` : 'No previous page');
+    }
+
+    async function goBackPage() {
+      prunePageBackStack();
+      const previousPage = pageBackStack.pop();
+      if (!previousPage) {
+        renderBackButtonState();
+        return;
+      }
+      await setCurrentPage(previousPage, { recordHistory: false });
+    }
+
+    async function setCurrentPage(title, options = {}) {
+      const { recordHistory = true } = options;
+      const previousTitle = state.currentPage;
       const page = ensurePage(title);
       if (!page) return;
+      if (recordHistory && previousTitle && previousTitle !== page.title && state.pages[previousTitle]) {
+        if (pageBackStack[pageBackStack.length - 1] !== previousTitle) pageBackStack.push(previousTitle);
+        if (pageBackStack.length > 100) pageBackStack.shift();
+      }
       state.currentPage = page.title;
       zoomedBlockId = null;
       selectedBlockIds.clear();
@@ -618,6 +670,7 @@ const STORAGE_KEY = 'local_roam_style_v1';
       if (!ok) return;
 
       delete state.pages[title];
+      pageBackStack = pageBackStack.filter(pageTitle => pageTitle !== title);
 
       const remaining = Object.keys(state.pages).sort((a, b) => a.localeCompare(b));
       state.currentPage = remaining[0] || '';
@@ -991,7 +1044,7 @@ const STORAGE_KEY = 'local_roam_style_v1';
     });
 
     window.addEventListener('beforeunload', () => {
-      saveData();
+      if (storageReady) saveData();
     });
 
     function getPageOutgoingLinks(page) {
@@ -1864,6 +1917,8 @@ const STORAGE_KEY = 'local_roam_style_v1';
       if (!blocks || !graphView || !workspace) return;
       blocks.classList.toggle('hidden', !viewShowsEditor());
       graphView.classList.toggle('hidden', !viewShowsGraph());
+      const linkedRefsSection = document.getElementById('linkedRefsSection');
+      if (linkedRefsSection) linkedRefsSection.classList.toggle('hidden', !viewShowsEditor());
       workspace.classList.toggle('view-editor', currentView === 'editor');
       workspace.classList.toggle('view-graph', currentView === 'graph');
       workspace.classList.toggle('view-split', currentView === 'split');
@@ -2663,20 +2718,45 @@ const STORAGE_KEY = 'local_roam_style_v1';
       renderAutocompleteMenu();
     }
 
+    function findBlockAncestors(blocks, targetId, path = []) {
+      for (const block of blocks) {
+        const next = [...path, block];
+        if (block.id === targetId) return next;
+        const found = findBlockAncestors(block.children || [], targetId, next);
+        if (found) return found;
+      }
+      return null;
+    }
+
     function getBacklinks(targetTitle) {
-      const linked = [];
-      const unlinked = [];
+      const linkedByPage = new Map();
+      const unlinkedByPage = new Map();
       const plainRx = new RegExp(`(^|[^\\[])(\\b${escapeRegExp(targetTitle)}\\b)(?!\\]\\])`, 'i');
+
       for (const [pageTitle, page] of Object.entries(state.pages)) {
+        const isCurrentPage = pageTitle === targetTitle;
+        if (isCurrentPage) continue;
+
+        ensurePageSchema(page);
         walkBlocks(page.blocks, (block) => {
           const txt = block.text || '';
           const matches = [...txt.matchAll(/\[\[([^\]]+)\]\]/g)].map(m => normalizeWikiTitle(m[1]));
-          const isCurrentPage = pageTitle === targetTitle;
-          if (matches.includes(targetTitle) && !isCurrentPage) linked.push({ pageTitle, blockId: block.id, text: txt });
-          else if (!isCurrentPage && plainRx.test(txt)) unlinked.push({ pageTitle, blockId: block.id, text: txt });
+          const ancestors = findBlockAncestors(page.blocks, block.id) || [];
+          const breadcrumb = ancestors.slice(0, -1); // all ancestors except the block itself
+
+          const ref = { pageTitle, blockId: block.id, text: txt, breadcrumb, children: block.children || [] };
+
+          if (matches.includes(targetTitle)) {
+            if (!linkedByPage.has(pageTitle)) linkedByPage.set(pageTitle, []);
+            linkedByPage.get(pageTitle).push(ref);
+          } else if (plainRx.test(txt)) {
+            if (!unlinkedByPage.has(pageTitle)) unlinkedByPage.set(pageTitle, []);
+            unlinkedByPage.get(pageTitle).push(ref);
+          }
         });
       }
-      return { linked, unlinked };
+
+      return { linkedByPage, unlinkedByPage };
     }
 
     function getAllTagsWithCounts() {
@@ -2758,7 +2838,11 @@ const STORAGE_KEY = 'local_roam_style_v1';
       const q = document.getElementById('searchInput').value || '';
       const el = document.getElementById('searchResults');
       if (!q.trim()) {
-        el.innerHTML = '<div class="muted">Type to search all pages and blocks</div>';
+        el.innerHTML = '';
+        return;
+      }
+      if (searchResultsCollapsed) {
+        el.innerHTML = '';
         return;
       }
       const results = gatherSearchResults(q);
@@ -2773,23 +2857,30 @@ const STORAGE_KEY = 'local_roam_style_v1';
         </div>
       `).join('');
       el.querySelectorAll('.search-item[data-open-page]').forEach(item => {
-        item.addEventListener('click', (e) => {
+        item.addEventListener('click', async (e) => {
           if (e.target.closest('a[data-open-page], a[data-wiki]')) return;
-          setCurrentPage(item.dataset.openPage);
+          await openSearchResultPage(item.dataset.openPage);
         });
-        item.addEventListener('keydown', (e) => {
+        item.addEventListener('keydown', async (e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
-            setCurrentPage(item.dataset.openPage);
+            await openSearchResultPage(item.dataset.openPage);
           }
         });
       });
       el.querySelectorAll('a[data-open-page]').forEach(a => {
-        a.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); setCurrentPage(a.dataset.openPage); });
+        a.addEventListener('click', async (e) => { e.preventDefault(); e.stopPropagation(); await openSearchResultPage(a.dataset.openPage); });
       });
       el.querySelectorAll('a[data-wiki]').forEach(a => {
-        a.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); setCurrentPage(a.dataset.wiki); });
+        a.addEventListener('click', async (e) => { e.preventDefault(); e.stopPropagation(); await openSearchResultPage(a.dataset.wiki); });
       });
+    }
+
+    async function openSearchResultPage(title) {
+      searchResultsCollapsed = true;
+      const el = document.getElementById('searchResults');
+      if (el) el.innerHTML = '';
+      await setCurrentPage(title);
     }
 
     function renderPagesList() {
@@ -2836,6 +2927,7 @@ const STORAGE_KEY = 'local_roam_style_v1';
 
           const wasCurrent = state.currentPage === title;
           delete state.pages[title];
+          pageBackStack = pageBackStack.filter(pageTitle => pageTitle !== title);
 
           if (wasCurrent) {
             const remaining = Object.keys(state.pages).sort((a, b) => a.localeCompare(b));
@@ -3247,13 +3339,18 @@ const STORAGE_KEY = 'local_roam_style_v1';
           }
           if (key === 'n') {
             const { start, end } = getSelectionOffsets(input);
+            const text = getEditorText(input);
             const sel = start !== end
-              ? getEditorText(input).substring(start, end).trim()
+              ? text.substring(start, end).trim()
               : '';
             if (sel) {
-              // Selected text → create/open page with that name
+              // Selected text -> link it in the source block and ensure the page exists.
               e.preventDefault();
-              await setCurrentPage(sel);
+              const replacement = `[[${sel}]]`;
+              replaceEditorRange(input, block, start, end, replacement, start + replacement.length);
+              ensurePage(sel);
+              await saveData();
+              renderPagesList();
               return;
             }
             // Nothing selected → focus the New Page input in the sidebar
@@ -3493,42 +3590,163 @@ const STORAGE_KEY = 'local_roam_style_v1';
       container.appendChild(bar);
     }
 
+    // Track which page groups are collapsed in the linked refs panel
+    let linkedRefsCollapsed = new Set();
+    let unlinkedRefsSectionCollapsed = false;
+
+    function renderRefBlockWithChildren(block, targetTitle, depth = 0) {
+      const highlightedText = renderRichTextHighlighted(block.text || '', targetTitle);
+      let html = `<div class="ref-block" style="${depth > 0 ? `margin-left:${depth * 18}px;border-left:2px solid var(--ref-indent-border, #2b3550);padding-left:8px;` : ''}">`;
+      html += `<div class="ref-block-text">${highlightedText}</div>`;
+      const visibleChildren = (block.children || []).filter(c => c.text || (c.children && c.children.length));
+      if (visibleChildren.length) {
+        html += visibleChildren.map(child => renderRefBlockWithChildren(child, targetTitle, depth + 1)).join('');
+      }
+      html += '</div>';
+      return html;
+    }
+
+    function renderRichTextHighlighted(text, highlightTitle) {
+      // Renders rich text but highlights the [[highlightTitle]] links
+      const rendered = renderRichText(text);
+      // Wrap all data-wiki links matching the target with a highlight class
+      const safeTitle = escapeHtml(highlightTitle);
+      return rendered.replace(
+        new RegExp(`<a data-wiki="${safeTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"([^>]*)>`, 'gi'),
+        `<a data-wiki="${safeTitle}"$1 class="linked-ref-highlight">`
+      );
+    }
+
+    function renderBreadcrumb(breadcrumb, pageTitle) {
+      if (!breadcrumb || !breadcrumb.length) return '';
+      const crumbs = breadcrumb.map(b => {
+        const truncated = (b.text || 'Untitled block').replace(/\s+/g, ' ').slice(0, 40);
+        return `<span class="ref-breadcrumb-item" title="${escapeHtml(b.text || '')}">${escapeHtml(truncated)}${(b.text || '').length > 40 ? '…' : ''}</span>`;
+      });
+      return `<div class="ref-breadcrumb"><span class="ref-breadcrumb-page">${escapeHtml(pageTitle)}</span>${crumbs.length ? ' <span class="ref-breadcrumb-sep">›</span> ' + crumbs.join(' <span class="ref-breadcrumb-sep">›</span> ') : ''}</div>`;
+    }
+
     function renderBacklinks() {
-      const refs = getBacklinks(state.currentPage);
+      const { linkedByPage, unlinkedByPage } = getBacklinks(state.currentPage);
       const el = document.getElementById('backlinks');
-      if (!refs.linked.length && !refs.unlinked.length) {
-        el.innerHTML = '<div class="muted">No backlinks yet.</div>';
+
+      const totalLinked = [...linkedByPage.values()].reduce((s, arr) => s + arr.length, 0);
+      const totalUnlinked = [...unlinkedByPage.values()].reduce((s, arr) => s + arr.length, 0);
+
+      if (totalLinked === 0 && totalUnlinked === 0) {
+        el.innerHTML = '<div class="backlinks-empty"><span class="backlinks-empty-icon">🔗</span><div>No references to this page yet.</div><div class="muted" style="margin-top:4px;font-size:11px;">Create links using [[PageName]] syntax</div></div>';
         return;
       }
-      const linkedHtml = refs.linked.length ? `
-        <h3 class="backlink-heading">Linked References</h3>
-        ${refs.linked.map(ref => `
-        <div class="ref-item">
-          <div class="from">from <a data-open-page="${escapeHtml(ref.pageTitle)}">${escapeHtml(ref.pageTitle)}</a></div>
-          <div>${renderRichText(ref.text)}</div>
-        </div>
-        `).join('')}
-      ` : '<h3 class="backlink-heading">Linked References</h3><div class="muted">No linked references.</div>';
 
-      const unlinkedHtml = refs.unlinked.length ? `
-        <h3 class="backlink-heading">Unlinked References</h3>
-        ${refs.unlinked.map(ref => `
-        <div class="ref-item">
-          <div class="from">from <a data-open-page="${escapeHtml(ref.pageTitle)}">${escapeHtml(ref.pageTitle)}</a></div>
-          <div>${renderRichText(ref.text)}</div>
-          <button class="convert-unlinked-btn" data-block-id="${escapeHtml(ref.blockId)}" type="button">Link mention</button>
-        </div>
-        `).join('')}
-      ` : '<h3 class="backlink-heading">Unlinked References</h3><div class="muted">No unlinked references.</div>';
+      let html = '';
 
-      el.innerHTML = linkedHtml + unlinkedHtml;
+      // ── Linked References section ──
+      html += `<div class="backlinks-section-header">`;
+      html += `<span class="backlinks-section-title">Linked References</span>`;
+      html += `<span class="backlinks-count-badge">${totalLinked}</span>`;
+      html += `</div>`;
 
+      if (totalLinked === 0) {
+        html += '<div class="muted" style="padding:8px 2px;font-size:12px;">No linked references.</div>';
+      } else {
+        for (const [pageTitle, refs] of linkedByPage) {
+          const collapsed = linkedRefsCollapsed.has(pageTitle);
+          const pageRefCount = refs.length;
+          html += `<div class="ref-page-group" data-ref-page="${escapeHtml(pageTitle)}">` +
+            `<div class="ref-page-header">` +
+            `<button class="ref-page-collapse-btn" data-collapse-page="${escapeHtml(pageTitle)}" aria-expanded="${collapsed ? 'false' : 'true'}" title="${collapsed ? 'Expand' : 'Collapse'}">${collapsed ? '▸' : '▾'}</button>` +
+            `<a class="ref-page-title" data-open-page="${escapeHtml(pageTitle)}">${escapeHtml(pageTitle)}</a>` +
+            `<span class="ref-page-count">${pageRefCount}</span>` +
+            `</div>`;
+          if (!collapsed) {
+            html += `<div class="ref-page-blocks">`;
+            for (const ref of refs) {
+              html += `<div class="ref-item" data-block-id="${escapeHtml(ref.blockId)}">` +
+                (ref.breadcrumb.length ? renderBreadcrumb(ref.breadcrumb, pageTitle) : '') +
+                renderRefBlockWithChildren({ text: ref.text, children: ref.children }, state.currentPage) +
+                `</div>`;
+            }
+            html += `</div>`;
+          }
+          html += `</div>`;
+        }
+      }
+
+      // ── Unlinked References section ──
+      if (totalUnlinked > 0) {
+        const ulCollapsed = unlinkedRefsSectionCollapsed;
+        html += `<div class="backlinks-section-header" style="margin-top:16px;">` +
+          `<button class="ref-section-collapse-btn" id="unlinkedSectionToggle" aria-expanded="${ulCollapsed ? 'false' : 'true'}">${ulCollapsed ? '▸' : '▾'}</button>` +
+          `<span class="backlinks-section-title">Unlinked References</span>` +
+          `<span class="backlinks-count-badge backlinks-count-unlinked">${totalUnlinked}</span>` +
+          `</div>`;
+
+        if (!ulCollapsed) {
+          for (const [pageTitle, refs] of unlinkedByPage) {
+            const collapsed = linkedRefsCollapsed.has('__unlinked__' + pageTitle);
+            const pageRefCount = refs.length;
+            html += `<div class="ref-page-group" data-ref-page="${escapeHtml(pageTitle)}" data-unlinked="1">` +
+              `<div class="ref-page-header">` +
+              `<button class="ref-page-collapse-btn" data-collapse-page="${escapeHtml(pageTitle)}" data-unlinked="1" aria-expanded="${collapsed ? 'false' : 'true'}">${collapsed ? '▸' : '▾'}</button>` +
+              `<a class="ref-page-title" data-open-page="${escapeHtml(pageTitle)}">${escapeHtml(pageTitle)}</a>` +
+              `<span class="ref-page-count">${pageRefCount}</span>` +
+              `</div>`;
+            if (!collapsed) {
+              html += `<div class="ref-page-blocks">`;
+              for (const ref of refs) {
+                html += `<div class="ref-item ref-item-unlinked" data-block-id="${escapeHtml(ref.blockId)}">` +
+                  (ref.breadcrumb.length ? renderBreadcrumb(ref.breadcrumb, pageTitle) : '') +
+                  renderRefBlockWithChildren({ text: ref.text, children: ref.children }, state.currentPage) +
+                  `<button class="convert-unlinked-btn" data-block-id="${escapeHtml(ref.blockId)}" type="button"><span>🔗</span> Link mention</button>` +
+                  `</div>`;
+              }
+              html += `</div>`;
+            }
+            html += `</div>`;
+          }
+        }
+      }
+
+      el.innerHTML = html;
+
+      // Wire up page link clicks
       el.querySelectorAll('a[data-open-page]').forEach(a => {
         a.addEventListener('click', (e) => { e.preventDefault(); setCurrentPage(a.dataset.openPage); });
       });
       el.querySelectorAll('a[data-wiki]').forEach(a => {
         a.addEventListener('click', (e) => { e.preventDefault(); setCurrentPage(a.dataset.wiki); });
       });
+
+      // Wire up page group collapse toggles (linked)
+      el.querySelectorAll('.ref-page-collapse-btn[data-collapse-page]:not([data-unlinked])').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const pg = btn.dataset.collapsePage;
+          if (linkedRefsCollapsed.has(pg)) linkedRefsCollapsed.delete(pg);
+          else linkedRefsCollapsed.add(pg);
+          renderBacklinks();
+        });
+      });
+
+      // Wire up page group collapse toggles (unlinked)
+      el.querySelectorAll('.ref-page-collapse-btn[data-collapse-page][data-unlinked]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const key = '__unlinked__' + btn.dataset.collapsePage;
+          if (linkedRefsCollapsed.has(key)) linkedRefsCollapsed.delete(key);
+          else linkedRefsCollapsed.add(key);
+          renderBacklinks();
+        });
+      });
+
+      // Wire up unlinked section collapse toggle
+      const ulToggle = el.querySelector('#unlinkedSectionToggle');
+      if (ulToggle) {
+        ulToggle.addEventListener('click', () => {
+          unlinkedRefsSectionCollapsed = !unlinkedRefsSectionCollapsed;
+          renderBacklinks();
+        });
+      }
+
+      // Wire up convert-to-link buttons
       el.querySelectorAll('.convert-unlinked-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
           const found = findBlockById(btn.dataset.blockId);
@@ -3537,6 +3755,16 @@ const STORAGE_KEY = 'local_roam_style_v1';
           found.block.text = (found.block.text || '').replace(rx, (_m, prefix, title) => `${prefix}[[${title}]]`);
           await saveData();
           render();
+        });
+      });
+
+      // Wire up ref-item click to navigate to source block
+      el.querySelectorAll('.ref-item[data-block-id]').forEach(item => {
+        item.addEventListener('click', (e) => {
+          if (e.target.closest('a, button, input')) return;
+          const blockId = item.dataset.blockId;
+          const found = findBlockById(blockId);
+          if (found) setCurrentPage(found.pageTitle);
         });
       });
     }
@@ -3603,6 +3831,7 @@ const STORAGE_KEY = 'local_roam_style_v1';
     }
 
     function render() {
+      renderBackButtonState();
       renderPagesList();
       renderTagFilters();
       renderCurrentPageMeta();
@@ -3622,13 +3851,22 @@ const STORAGE_KEY = 'local_roam_style_v1';
       input.value = '';
     }
 
+    document.getElementById('backPageBtn').addEventListener('click', () => { goBackPage(); });
     document.getElementById('newPageBtn').addEventListener('click', () => { openOrCreateFromInput(); });
     document.getElementById('newPageInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') openOrCreateFromInput(); });
-    document.getElementById('searchInput').addEventListener('input', () => renderSearchResults());
+    document.getElementById('searchInput').addEventListener('input', () => {
+      searchResultsCollapsed = false;
+      renderSearchResults();
+    });
+    document.getElementById('searchInput').addEventListener('focus', () => {
+      searchResultsCollapsed = false;
+      renderSearchResults();
+    });
     document.getElementById('searchInput').addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         e.preventDefault();
         const si = document.getElementById('searchInput');
+        searchResultsCollapsed = false;
         si.value = '';
         renderSearchResults();
         si.blur();
@@ -3636,11 +3874,12 @@ const STORAGE_KEY = 'local_roam_style_v1';
     });
     document.addEventListener('keydown', (e) => {
       // Ctrl+F or Cmd+F → open global search
-      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
         e.preventDefault();
-        openLeftSidebar();
         const si = document.getElementById('searchInput');
         if (si) {
+          searchResultsCollapsed = false;
+          renderSearchResults();
           si.focus();
           si.select();
         }
@@ -3748,6 +3987,7 @@ const STORAGE_KEY = 'local_roam_style_v1';
       ensurePageSchema(page);
       state.pages[newTitle] = page;
       state.currentPage = newTitle;
+      pageBackStack = pageBackStack.map(title => title === oldTitle ? newTitle : title);
       await saveData();
       render();
     });
@@ -3755,9 +3995,10 @@ const STORAGE_KEY = 'local_roam_style_v1';
     document.getElementById('resetBtn').addEventListener('click', async () => {
       const ok = confirm('Delete all local notes? This cannot be undone.');
       if (!ok) return;
-      if (!HAS_DESKTOP_STORAGE) localStorage.removeItem(STORAGE_KEY);
+      if (!HAS_DESKTOP_STORAGE && !HAS_SERVER_STORAGE) localStorage.removeItem(STORAGE_KEY);
       state = defaultData();
-      await saveData();
+      pageBackStack = [];
+      await saveData({ allowDestructive: true });
       render();
     });
 
@@ -3771,6 +4012,39 @@ const STORAGE_KEY = 'local_roam_style_v1';
       URL.revokeObjectURL(url);
     });
 
+    async function createNotesBackup() {
+      try {
+        let res;
+        if (HAS_DESKTOP_STORAGE) {
+          res = await window.storageAPI.backup(state);
+        } else if (HAS_SERVER_STORAGE) {
+          res = await fetch('/api/storage/backup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: state })
+          }).then(r => r.json());
+        } else {
+          const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `roam-notes-backup-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+          alert('Backup downloaded. Desktop storage is required to save directly to Documents.');
+          return;
+        }
+
+        if (!res?.ok) throw new Error(res?.error || 'Backup failed');
+        alert(`Backup created:\n${res.path}`);
+      } catch (err) {
+        alert('Backup failed: ' + err.message);
+      }
+    }
+
+    document.getElementById('backupBtn').addEventListener('click', createNotesBackup);
+    document.getElementById('backupMenuBtn').addEventListener('click', createNotesBackup);
+
     document.getElementById('importBtn').addEventListener('click', () => document.getElementById('importFile').click());
 
     document.getElementById('importFile').addEventListener('change', async (e) => {
@@ -3781,7 +4055,8 @@ const STORAGE_KEY = 'local_roam_style_v1';
         const parsed = JSON.parse(text);
         if (!parsed.pages || typeof parsed.pages !== 'object') throw new Error('Invalid JSON format');
         state = sanitizeLoadedData(parsed);
-        await saveData();
+        pageBackStack = [];
+        await saveData({ allowDestructive: true });
         render();
       } catch (err) {
         alert('Import failed: ' + err.message);
@@ -3793,9 +4068,13 @@ const STORAGE_KEY = 'local_roam_style_v1';
     async function bootstrap() {
       audit('bootstrap.start');
       state = await loadStateFromStorage();
+      storageReady = true;
       const meta = document.getElementById('storageMeta');
       if (HAS_DESKTOP_STORAGE) {
         const p = await window.storageAPI.path();
+        meta.textContent = '';
+      } else if (HAS_SERVER_STORAGE) {
+        const p = await fetch('/api/storage/path', { cache: 'no-store' }).then(r => r.json());
         meta.textContent = '';
       } else {
         meta.textContent = '';

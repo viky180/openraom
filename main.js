@@ -1,24 +1,6 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
-const fs = require('fs/promises');
-
-const DATA_FILE = 'notes-data.json';
-const CUSTOM_DATA_DIR = 'C:\\Users\\viky1\\Downloads\\notes_roam';
-
-function getDataFilePath() {
-  return path.join(CUSTOM_DATA_DIR, DATA_FILE);
-}
-
-async function ensureDataFile() {
-  const filePath = getDataFilePath();
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  try {
-    await fs.access(filePath);
-  } catch {
-    await fs.writeFile(filePath, JSON.stringify(null), 'utf8');
-  }
-  return filePath;
-}
+const storage = require('./storage');
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -64,34 +46,23 @@ function createWindow() {
 }
 
 ipcMain.handle('storage:load', async () => {
-  const filePath = await ensureDataFile();
-  try {
-    const text = await fs.readFile(filePath, 'utf8');
-    if (!text || text.trim() === '' || text.trim() === 'null') {
-      return { ok: true, data: null };
-    }
-    return { ok: true, data: JSON.parse(text) };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+  return storage.loadData();
 });
 
-ipcMain.handle('storage:save', async (_event, data) => {
-  const filePath = await ensureDataFile();
-  try {
-    await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf8');
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+ipcMain.handle('storage:save', async (_event, data, options) => {
+  return storage.saveData(data, options);
+});
+
+ipcMain.handle('storage:backup', async (_event, data, options) => {
+  return storage.createUserBackup(data, options);
 });
 
 ipcMain.handle('storage:path', async () => {
-  return { ok: true, path: getDataFilePath() };
+  return { ok: true, path: storage.getDataFilePath() };
 });
 
 app.whenReady().then(async () => {
-  await ensureDataFile();
+  await storage.ensureDataFile();
   createWindow();
 
   app.on('activate', () => {

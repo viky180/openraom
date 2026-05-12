@@ -4,7 +4,8 @@
   "description": "Local-only Roam-style notes desktop app",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "web": "node server.js"
   },
   "author": "",
   "license": "MIT",
