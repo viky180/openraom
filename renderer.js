@@ -3,7 +3,22 @@ const STORAGE_KEY = 'local_roam_style_v1';
     const HAS_SERVER_STORAGE = !HAS_DESKTOP_STORAGE && /^https?:$/.test(window.location.protocol);
 
     function uid() { return 'b_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8); }
-    function todayTitle() { return new Date().toISOString().slice(0, 10); }
+    function ordinalSuffix(day) {
+      if (day >= 11 && day <= 13) return 'th';
+      switch (day % 10) {
+        case 1: return 'st';
+        case 2: return 'nd';
+        case 3: return 'rd';
+        default: return 'th';
+      }
+    }
+    function todayTitle() {
+      const d = new Date();
+      const month = d.toLocaleString('en-US', { month: 'long' });
+      const day = d.getDate();
+      const year = d.getFullYear();
+      return `${month} ${day}${ordinalSuffix(day)}, ${year}`;
+    }
 
     function getTimeOfDayLabel(date = new Date()) {
       const hour = date.getHours();
@@ -499,16 +514,8 @@ const STORAGE_KEY = 'local_roam_style_v1';
       await saveData();
     }
 
-    const DAILY_TEMPLATE_LINES = [
-      '## Daily Plan',
-      '- Top 3 priorities:',
-      '- Meetings:',
-      '## Notes',
-      '- ',
-      '## Reflection',
-      '- Wins:',
-      '- Improvements:'
-    ];
+    // Daily pages start blank, matching Roam Research behavior.
+    // Templates are a user-configured concern (SmartBlocks, etc.), not built-in.
 
     const SAVE_DEBOUNCE_MS = 220;
     let saveTimer = null;
@@ -591,15 +598,15 @@ const STORAGE_KEY = 'local_roam_style_v1';
     }
 
     function isDailyTitle(title) {
-      return /^\d{4}-\d{2}-\d{2}$/.test((title || '').trim());
+      // Matches Roam Research date format: "May 12th, 2026"
+      return /^(?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}(?:st|nd|rd|th), \d{4}$/.test((title || '').trim());
     }
 
     function applyDailyTemplateIfNeeded(page, title) {
-      if (!isDailyTitle(title)) return;
-      if (page.blocks && page.blocks.length && page.blocks.some(b => (b.text || '').trim().length > 0 || (b.children || []).length > 0)) return;
-      page.blocks = DAILY_TEMPLATE_LINES.map(line => ({ id: uid(), text: line, children: [] }));
-      page.tags = [...new Set([...(page.tags || []), 'daily'])];
+      // Roam Research does not auto-fill daily pages with a template.
+      // Pages start blank; this function is intentionally a no-op.
     }
+
 
     function ensurePage(title) {
       const clean = (title || '').trim();
@@ -1918,11 +1925,14 @@ const STORAGE_KEY = 'local_roam_style_v1';
       blocks.classList.toggle('hidden', !viewShowsEditor());
       graphView.classList.toggle('hidden', !viewShowsGraph());
       const linkedRefsSection = document.getElementById('linkedRefsSection');
-      if (linkedRefsSection) linkedRefsSection.classList.toggle('hidden', !viewShowsEditor());
+      // In split view, linkedRefs is visible and spans the bottom row (via CSS grid).
+      // In graph-only view, hide it since the editor is hidden.
+      if (linkedRefsSection) linkedRefsSection.classList.toggle('hidden', currentView === 'graph');
       workspace.classList.toggle('view-editor', currentView === 'editor');
       workspace.classList.toggle('view-graph', currentView === 'graph');
       workspace.classList.toggle('view-split', currentView === 'split');
-      if (viewShowsGraph()) renderGraphView();
+      // Defer graph render so the SVG has correct layout dimensions after the grid reflow.
+      if (viewShowsGraph()) requestAnimationFrame(() => renderGraphView());
 
       const btnEditor = document.getElementById('viewEditorBtn');
       const btnGraph = document.getElementById('viewGraphBtn');
@@ -1931,6 +1941,7 @@ const STORAGE_KEY = 'local_roam_style_v1';
       if (btnGraph) btnGraph.classList.toggle('active-view', currentView === 'graph');
       if (btnSplit) btnSplit.classList.toggle('active-view', currentView === 'split');
     }
+
 
     function walkBlocks(blocks, visitor, depth = 0) {
       for (const b of blocks) { visitor(b, depth); walkBlocks(b.children, visitor, depth + 1); }
@@ -3830,6 +3841,12 @@ const STORAGE_KEY = 'local_roam_style_v1';
       renderThemeToggle();
     }
 
+    function renderTodayBtn() {
+      const btn = document.getElementById('sidebarTodayBtn');
+      if (!btn) return;
+      btn.classList.toggle('active-today', state.currentPage === todayTitle());
+    }
+
     function render() {
       renderBackButtonState();
       renderPagesList();
@@ -3841,6 +3858,7 @@ const STORAGE_KEY = 'local_roam_style_v1';
       renderSearchResults();
       renderViewMode();
       renderThemeToggle();
+      renderTodayBtn();
     }
 
     async function openOrCreateFromInput() {
@@ -3953,15 +3971,11 @@ const STORAGE_KEY = 'local_roam_style_v1';
     });
 
     document.getElementById('newDailyBtn').addEventListener('click', async () => {
-      const title = todayTitle();
-      const existed = !!state.pages[title];
-      await setCurrentPage(title);
-      if (!existed) {
-        const page = state.pages[title];
-        applyDailyTemplateIfNeeded(page, title);
-        await saveData();
-        render();
-      }
+      await setCurrentPage(todayTitle());
+    });
+
+    document.getElementById('sidebarTodayBtn').addEventListener('click', async () => {
+      await setCurrentPage(todayTitle());
     });
 
     document.getElementById('pageTitle').addEventListener('input', () => {
@@ -4071,14 +4085,18 @@ const STORAGE_KEY = 'local_roam_style_v1';
       storageReady = true;
       const meta = document.getElementById('storageMeta');
       if (HAS_DESKTOP_STORAGE) {
-        const p = await window.storageAPI.path();
+        await window.storageAPI.path();
         meta.textContent = '';
       } else if (HAS_SERVER_STORAGE) {
-        const p = await fetch('/api/storage/path', { cache: 'no-store' }).then(r => r.json());
+        await fetch('/api/storage/path', { cache: 'no-store' }).then(r => r.json());
         meta.textContent = '';
       } else {
         meta.textContent = '';
       }
+      // Fix 3: Auto-navigate to today's daily page on startup, matching Roam Research.
+      const todayPageTitle = todayTitle();
+      ensurePage(todayPageTitle);
+      state.currentPage = todayPageTitle;
       applyTheme(state.theme);
       applySidebarLayout();
       render();

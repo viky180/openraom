@@ -2,6 +2,8 @@
       --bg: #0f1115;
       --panel: #151924;
       --panel-2: #1a2030;
+      --graph-bg: #0c0e11;
+      --main-bg: #111827;
       --text: #e8eefc;
       --muted: #9fb0d5;
       --accent-2: #8dd0ff;
@@ -34,9 +36,35 @@
     .page-btn { width: 100%; text-align: left; border: none; border-radius: 8px; padding: 9px 10px; background: transparent; color: var(--text); }
     .page-btn:hover { background: #1a2336; }
     .page-btn.active { background: #24385f; color: #fff; font-weight: 600; }
-
     .page-row { display: flex; gap: 6px; align-items: center; }
-    .page-row .page-btn { flex: 1; min-width: 0; }
+    /* Today button — prominent sidebar shortcut, like Roam's Daily Notes icon */
+    .today-btn {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      font-size: 14px;
+      font-weight: 600;
+      background: linear-gradient(135deg, #1a3660 0%, #162d54 100%);
+      border: 1px solid #3a5a9a;
+      border-radius: 10px;
+      color: #8dd0ff;
+      letter-spacing: 0.01em;
+      transition: background 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
+    }
+    .today-btn:hover {
+      background: linear-gradient(135deg, #1f4278 0%, #1a3868 100%);
+      border-color: #6ca5ff;
+      color: #c8e8ff;
+      box-shadow: 0 0 0 1px rgba(141,208,255,0.2) inset;
+    }
+    .today-btn.active-today {
+      background: linear-gradient(135deg, #243f72 0%, #1d3460 100%);
+      border-color: #6ca5ff;
+      color: #c8e8ff;
+      box-shadow: 0 0 0 2px rgba(108,165,255,0.25) inset;
+    }
     .page-delete-btn {
       width: 28px;
       min-width: 28px;
@@ -301,12 +329,28 @@
     .workspace.view-split {
       display: grid;
       grid-template-columns: minmax(360px, 1fr) minmax(360px, 1fr);
+      grid-template-rows: auto auto;
       gap: 18px;
       align-items: start;
     }
+    /* Editor (blocks) in col 1, row 1 */
+    .workspace.view-split #blocks {
+      grid-column: 1;
+      grid-row: 1;
+    }
+    /* Graph in col 2, spans both rows — sticky so it stays in view while scrolling */
     .workspace.view-split .graph-view {
+      grid-column: 2;
+      grid-row: 1 / span 2;
       position: sticky;
       top: 0;
+      align-self: start;
+    }
+    /* Linked refs below editor in col 1 only — graph stays sticky in col 2 */
+    .workspace.view-split .linked-refs-section {
+      grid-column: 1;
+      grid-row: 2;
+      margin-top: 8px;
     }
     .graph-view { position: relative; border: 1px solid #1e2538; border-radius: 12px; background: #0e1018; padding: 10px; min-width: 0; }
     .graph-toolbar {
@@ -402,7 +446,7 @@
       min-height: 400px;
       display: block;
       border-radius: 10px;
-      background: #0c0e11;
+      background: var(--graph-bg);
       cursor: grab;
       touch-action: none;
     }
@@ -575,6 +619,8 @@
       --muted: #61708a;
       --accent-2: #2563eb;
       --border: #d6deea;
+      --graph-bg: radial-gradient(circle at center, #e8f0fc 0%, #f2f6ff 70%);
+      --main-bg: #f9fbff;
       background: #f5f7fb;
       color: #1f2a3d;
     }
@@ -590,6 +636,22 @@
     body.theme-light .active-view { border-color: #4b74c4; background: #dce8ff; color: #1f2a3d; box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.18) inset; }
     body.theme-light .page-btn:hover { background: #eef3fc; }
     body.theme-light .page-btn.active { background: #dce8ff; color: #1f2a3d; }
+    body.theme-light .today-btn {
+      background: linear-gradient(135deg, #dce8ff 0%, #cfe0ff 100%);
+      border-color: #8ab4ea;
+      color: #1a3a72;
+    }
+    body.theme-light .today-btn:hover {
+      background: linear-gradient(135deg, #cddff9 0%, #bfd4f8 100%);
+      border-color: #4b74c4;
+      color: #0f2856;
+      box-shadow: 0 0 0 1px rgba(37,99,235,0.15) inset;
+    }
+    body.theme-light .today-btn.active-today {
+      background: linear-gradient(135deg, #c0d6ff 0%, #b0c9f8 100%);
+      border-color: #4b74c4;
+      color: #0f2856;
+    }
     body.theme-light .main { background: linear-gradient(180deg, #f9fbff 0%, #f1f5fc 100%); }
     body.theme-light .top-search .search-input { background: #ffffff; box-shadow: 0 1px 0 rgba(25,42,70,0.04) inset; }
     body.theme-light .top-search .search-results { background: #ffffff; box-shadow: 0 12px 28px rgba(25,42,70,0.16); }
@@ -621,7 +683,7 @@
     body.theme-light .preview code { background: #eaf1ff; border-color: #bdd0ef; }
     /* Light mode: lighter graph canvas */
     body.theme-light .graph-view { background: #eef3fb; border-color: #c8d6ee; }
-    body.theme-light .graph-svg { background: radial-gradient(circle at center, #e8f0fc 0%, #f2f6ff 70%); }
+    body.theme-light .graph-svg { background: var(--graph-bg); }
     body.theme-light .graph-edge { stroke: #b0c0de; stroke-width: 0.9; opacity: 0.85; }
     body.theme-light .graph-edge.neighbor { stroke: #5b82c0; stroke-width: 1.5; opacity: 1; }
     body.theme-light .graph-edge.dimmed { opacity: 0.18; }
@@ -742,8 +804,13 @@
     @media (max-width: 1100px) {
       .workspace.view-split {
         grid-template-columns: 1fr;
+        grid-template-rows: auto;
       }
-      .workspace.view-split .graph-view {
+      .workspace.view-split #blocks,
+      .workspace.view-split .graph-view,
+      .workspace.view-split .linked-refs-section {
+        grid-column: 1;
+        grid-row: auto;
         position: static;
       }
       .graph-controls {
