@@ -1,40 +1,58 @@
-﻿name: Deploy Mobile PWA to GitHub Pages
+name: Publish Mobile PWA to gh-pages
 
 on:
   push:
     branches: [main]
     paths:
-      - 'mobile-pwa/**'
-      - '.github/workflows/pages.yml'
+      - "mobile-pwa/**"
+      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: gh-pages-publish
+  cancel-in-progress: true
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  publish:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout main
         uses: actions/checkout@v4
-
-      - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload mobile PWA
-        uses: actions/upload-pages-artifact@v3
         with:
-          path: mobile-pwa
+          fetch-depth: 0
 
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Publish mobile PWA folder
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin gh-pages || true
+          rm -rf ../gh-pages-worktree
+
+          if git show-ref --verify --quiet refs/remotes/origin/gh-pages; then
+            git worktree add ../gh-pages-worktree origin/gh-pages
+          else
+            git worktree add --detach ../gh-pages-worktree
+          fi
+
+          cd ../gh-pages-worktree
+          git checkout -B gh-pages
+
+          find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+          cp -R "$GITHUB_WORKSPACE/mobile-pwa/." .
+          touch .nojekyll
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No mobile PWA changes to publish."
+            exit 0
+          fi
+
+          git commit -m "Deploy mobile PWA"
+          git push origin gh-pages
