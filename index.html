@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0e1318" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Graph Notes" />
+  <title>Graph Notes Mobile</title>
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <button id="navToggle" class="icon-btn" type="button" aria-label="Open pages">☰</button>
+      <div class="brand">
+        <span class="brand-kicker">Offline graph</span>
+        <strong>Graph Notes</strong>
+      </div>
+      <button id="installBtn" class="install-btn hidden" type="button">Install</button>
+    </header>
+
+    <aside id="drawer" class="drawer" aria-label="Pages and tools">
+      <div class="drawer-head">
+        <div>
+          <span class="brand-kicker">Notebook</span>
+          <h1>Pages</h1>
+        </div>
+        <button id="drawerClose" class="icon-btn" type="button" aria-label="Close pages">×</button>
+      </div>
+
+      <label class="field-label" for="searchInput">Search</label>
+      <input id="searchInput" class="search-input" placeholder="Find pages or blocks" />
+      <div id="searchResults" class="search-results"></div>
+
+      <div class="quick-actions">
+        <button id="todayBtn" type="button">Today</button>
+        <button id="newPageBtn" type="button">New page</button>
+      </div>
+
+      <div id="pagesList" class="pages-list"></div>
+
+      <div class="drawer-tools">
+        <button id="importBtn" type="button">Import JSON</button>
+        <button id="exportBtn" type="button">Export JSON</button>
+        <button id="resetBtn" class="danger" type="button">Reset</button>
+        <input id="importFile" type="file" accept="application/json" hidden />
+      </div>
+    </aside>
+
+    <div id="scrim" class="scrim hidden"></div>
+
+    <main class="workspace">
+      <section id="emptyState" class="empty-state hidden">
+        <p class="eyebrow">Ready for your Roam export</p>
+        <h2>Import your notes JSON and keep them on this phone.</h2>
+        <p>Everything is stored in this browser using local offline storage. No server account is required.</p>
+        <button id="emptyImportBtn" type="button">Import JSON</button>
+      </section>
+
+      <section id="editor" class="editor">
+        <input id="pageTitle" class="page-title" aria-label="Page title" />
+        <div id="metaRow" class="meta-row"></div>
+        <div id="blocks" class="blocks"></div>
+        <button id="addBlockBtn" class="add-block" type="button">+ Add block</button>
+      </section>
+
+      <section class="context-panel">
+        <button id="contextToggle" class="context-toggle" type="button">Linked references</button>
+        <div id="backlinks" class="backlinks collapsed"></div>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="Primary actions">
+      <button id="bottomPagesBtn" type="button">Pages</button>
+      <button id="bottomTodayBtn" type="button">Today</button>
+      <button id="bottomAddBtn" type="button">Block</button>
+      <button id="bottomExportBtn" type="button">Export</button>
+    </nav>
+
+    <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+  </div>
+
+  <script src="./app.js" defer></script>
+</body>
+</html>
