@@ -794,14 +794,14 @@ async function registerServiceWorker() {
 
 const GRAPH = (() => {
   // ---------- physics constants ----------
-  const REPULSION   = 6000;
+  const REPULSION   = 4500;
   const SPRING_LEN  = 110;
   const SPRING_K    = 0.04;
-  const DAMPING     = 0.82;
-  const CENTER_PULL = 0.018;
-  const TICK_LIMIT  = 600;   // stop sim after this many ticks with no drag
-  const MIN_SPEED   = 0.03;  // world-space px/frame below which nodes are considered settled
-  const STABLE_TICKS_TO_STOP = 24;
+  const DAMPING     = 0.88;   // higher = settles faster
+  const CENTER_PULL = 0.022;
+  const TICK_LIMIT  = 300;   // stop sim after this many ticks with no drag (~5 s @ 60 fps)
+  const MIN_SPEED   = 0.25;  // px/frame threshold — raised so sim stops sooner
+  const STABLE_TICKS_TO_STOP = 15;
 
   // ---------- visual constants ----------
   const NODE_R_BASE   = 7;
@@ -1122,14 +1122,17 @@ const GRAPH = (() => {
     }
   }
 
-  function pointerMove(sx, sy) {
+  function pointerMove(sx, sy, isActualMove) {
     if (dragging) {
       const wp = screenToWorld(sx, sy);
       dragging.node.x = wp.x + dragging.ox;
       dragging.node.y = wp.y + dragging.oy;
-      tickCount = 0;
-      stableTicks = 0;
-      needsTick = true;
+      // Only restart physics when the user is actively dragging a node (not on a tap)
+      if (isActualMove) {
+        tickCount = 0;
+        stableTicks = 0;
+        needsTick = true;
+      }
     } else if (panning) {
       camX = panning.startCamX + (sx - panning.startX);
       camY = panning.startCamY + (sy - panning.startY);
@@ -1200,7 +1203,7 @@ const GRAPH = (() => {
       return;
     }
     const { x, y } = getPointerCanvas(e);
-    pointerMove(x, y);
+    pointerMove(x, y, true);
   }
 
   function onTouchEnd(e) {
@@ -1229,7 +1232,8 @@ const GRAPH = (() => {
 
   function onMouseMove(e) {
     const rect = canvas.getBoundingClientRect();
-    pointerMove(e.clientX - rect.left, e.clientY - rect.top);
+    // isActualMove=true only when a button is held (real drag), not just hovering
+    pointerMove(e.clientX - rect.left, e.clientY - rect.top, e.buttons > 0);
   }
 
   function onMouseUp(e) {
