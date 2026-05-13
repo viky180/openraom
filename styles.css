@@ -295,8 +295,9 @@ button, input, textarea { font: inherit; color: inherit; }
   display: none;
 }
 
-/* Block textarea */
+/* Block textarea — hidden until focused */
 .block textarea {
+  display: none;
   width: 100%;
   min-height: 42px;
   resize: none;
@@ -311,8 +312,13 @@ button, input, textarea { font: inherit; color: inherit; }
   transition: background 140ms, border-color 140ms;
 }
 .block textarea:focus {
+  display: block;
   background: var(--block-focus-bg);
   border-color: var(--border);
+}
+/* Show textarea when its block has any focused element */
+.block:focus-within textarea {
+  display: block;
 }
 
 .block-preview {
@@ -324,7 +330,8 @@ button, input, textarea { font: inherit; color: inherit; }
   word-break: break-word;
 }
 
-.block textarea:focus + .block-preview {
+/* Hide preview while editing */
+.block:focus-within .block-preview {
   display: none;
 }
 
