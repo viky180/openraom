@@ -23,7 +23,6 @@
 }
 
 /* ── Dark mode tokens ───────────────────────────────────── */
-:root.dark,
 @media (prefers-color-scheme: dark) {
   :root:not(.light) {
     --bg:            #0e1318;
@@ -289,48 +288,56 @@ button, input, textarea { font: inherit; color: inherit; }
 .block-body {
   min-width: 0;
   position: relative;
+  /* Ensure preview overlay is contained; min-height keeps empty blocks tappable */
+  min-height: 36px;
 }
 
 .block-action-trigger {
   display: none;
 }
 
-/* Block textarea — hidden until focused */
+/* Block textarea — always visible so mobile users can tap to type */
 .block textarea {
-  display: none;
+  display: block;
   width: 100%;
-  min-height: 42px;
+  min-height: 36px;
   resize: none;
   overflow: hidden;
-  padding: 10px 8px;
+  padding: 6px 8px;
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
-  color: var(--text);
+  color: transparent;         /* hide raw text — preview shows instead */
+  caret-color: var(--text);   /* but keep the cursor visible when typing */
   line-height: 1.5;
   outline: none;
-  transition: background 140ms, border-color 140ms;
+  transition: background 140ms, border-color 140ms, color 140ms;
+  position: relative;
+  z-index: 1;
 }
-.block textarea:focus {
-  display: block;
+.block textarea:focus,
+.block:focus-within textarea {
   background: var(--block-focus-bg);
   border-color: var(--border);
-}
-/* Show textarea when its block has any focused element */
-.block:focus-within textarea {
-  display: block;
+  color: var(--text);          /* show real text while editing */
 }
 
 .block-preview {
-  margin: -2px 8px 8px;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 6px 8px;
   color: var(--text);
   font-size: 14px;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+  pointer-events: none;   /* clicks fall through to the textarea below */
+  z-index: 0;
 }
 
-/* Hide preview while editing */
+/* Hide preview while editing so raw text in textarea is visible */
 .block:focus-within .block-preview {
   display: none;
 }
