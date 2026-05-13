@@ -1,4 +1,4 @@
-const CACHE_NAME = 'graph-notes-mobile-v1';
+const CACHE_NAME = 'graph-notes-mobile-v2';
 const APP_SHELL = [
   './index.html',
   './styles.css',
@@ -40,6 +40,24 @@ self.addEventListener('fetch', (event) => {
           return response;
         })
         .catch(() => caches.match('./index.html'))
+    );
+    return;
+  }
+
+  const requestUrl = new URL(request.url);
+  const isSameOrigin = requestUrl.origin === self.location.origin;
+  const shouldPreferNetwork = isSameOrigin && ['script', 'style', 'worker', 'manifest'].includes(request.destination);
+  if (shouldPreferNetwork) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response && response.status === 200 && response.type !== 'opaque') {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+          }
+          return response;
+        })
+        .catch(() => caches.match(request))
     );
     return;
   }

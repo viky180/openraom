@@ -6,6 +6,7 @@ const STORE_NAME = 'state';
 let state = { pages: {}, currentPage: '' };
 let saveTimer = null;
 let deferredInstallPrompt = null;
+let activeActionBlockId = null;
 
 const $ = (id) => document.getElementById(id);
 
@@ -223,8 +224,35 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+function renderInlineMarkdown(escapedLine) {
+  let t = escapedLine || '';
+  const placeholders = [];
+  const keep = (html) => {
+    placeholders.push(html);
+    return `\u0000${placeholders.length - 1}\u0000`;
+  };
+
+  t = t.replace(/\[([^\]]+)\]\(\[\[([^\]]+)\]\]\)/g, (_m, label, pageTitle) => keep(
+    `<span class="inline-wiki-link" data-open-page="${pageTitle}">${renderInlineMarkdown(label)}</span>`
+  ));
+  t = t.replace(/\[\[([^\]]+)\]\]/g, (_m, pageTitle) => keep(
+    `<span class="inline-wiki-link" data-open-page="${pageTitle}">[[${renderInlineMarkdown(pageTitle)}]]</span>`
+  ));
+  t = t.replace(/`([^`]+)`/g, '<code>$1</code>');
+  t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  t = t.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+  t = t.replace(/\u0000(\d+)\u0000/g, (_m, i) => placeholders[Number(i)] || '');
+
+  return t;
+}
+
 function render() {
   const hasPages = Object.keys(state.pages).length > 0;
+  if (!hasPages) closeBlockActionSheet();
+  if (activeActionBlockId && hasPages) {
+    const page = currentPage();
+    if (!page || !findBlock(page.blocks, activeActionBlockId)) closeBlockActionSheet();
+  }
   $('emptyState').classList.toggle('hidden', hasPages);
   $('editor').classList.toggle('hidden', !hasPages);
   document.querySelector('.context-panel').classList.toggle('hidden', !hasPages);
@@ -238,7 +266,7 @@ function render() {
 function updateTopbarTitle() {
   const titleEl = $('topbarTitle');
   if (!titleEl) return;
-  titleEl.textContent = state.currentPage || 'Graph Notes';
+  titleEl.textContent = 'Graph Notes';
 }
 
 function renderPages() {
@@ -264,11 +292,15 @@ function renderEditor() {
 }
 
 function renderBlock(block, depth) {
+  const wikiLinkChips = renderWikiLinkChips(block.text, block.id);
   const children = (block.children || []).map((child) => renderBlock(child, depth + 1)).join('');
   return `<article class="block" style="--depth:${depth}" data-block="${escapeHtml(block.id)}">
     <span class="bullet"></span>
     <div class="block-body">
+      <button class="block-action-trigger" type="button" data-open-actions="${escapeHtml(block.id)}" aria-label="Block actions">⋯</button>
       <textarea rows="1" data-edit-block="${escapeHtml(block.id)}" aria-label="Block text">${escapeHtml(block.text)}</textarea>
+      <div class="block-preview" data-preview-block="${escapeHtml(block.id)}">${renderInlineMarkdown(escapeHtml(block.text))}</div>
+      ${wikiLinkChips}
       <div class="block-actions">
         <button type="button" data-add-after="${escapeHtml(block.id)}">After</button>
         <button type="button" data-add-child="${escapeHtml(block.id)}">Child</button>
@@ -297,7 +329,7 @@ function renderBacklinks() {
   }
 
   $('backlinks').innerHTML = refs.length
-    ? refs.map((ref) => `<div class="ref-item"><div class="ref-title">${escapeHtml(ref.title)}</div><div class="ref-text">${escapeHtml(ref.text)}</div></div>`).join('')
+    ? refs.map((ref) => `<div class="ref-item"><div class="ref-title">${escapeHtml(ref.title)}</div><div class="ref-text">${renderInlineMarkdown(escapeHtml(ref.text))}</div></div>`).join('')
     : '<div class="ref-item"><div class="ref-text">No linked references yet.</div></div>';
 }
 
@@ -326,6 +358,63 @@ function renderSearch() {
       <small>${escapeHtml(result.text || '')}</small>
     </button>
   `).join('') || '<div class="ref-text">No matches</div>';
+}
+
+function renderWikiLinkChips(text, blockId) {
+  const wikiLinks = extractWikiLinks(text);
+  if (!wikiLinks.length) return '';
+  const chips = wikiLinks.map((title) => `<button type="button" class="wiki-link-chip" data-open-page="${escapeHtml(title)}">[[${escapeHtml(title)}]]</button>`).join('');
+  return `<div class="block-wiki-links" data-wiki-links-for="${escapeHtml(blockId)}">${chips}</div>`;
+}
+
+function extractWikiLinks(text) {
+  const links = [];
+  const seen = new Set();
+  const source = String(text || '');
+
+  const pushLink = (rawTitle) => {
+    const title = String(rawTitle || '').trim();
+    if (!title) return;
+    const key = title.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    links.push(title);
+  };
+
+  source.replace(/\[[^\]]+\]\(\[\[([^\]]+)\]\]\)/g, (_m, pageTitle) => {
+    pushLink(pageTitle);
+    return _m;
+  });
+  source.replace(/\[\[([^\]]+)\]\]/g, (_m, pageTitle) => {
+    pushLink(pageTitle);
+    return _m;
+  });
+
+  return links;
+}
+
+function refreshBlockWikiLinks(input) {
+  const blockBody = input.closest('.block-body');
+  if (!blockBody) return;
+  const chipsMarkup = renderWikiLinkChips(input.value, input.dataset.editBlock || '');
+  let chipsEl = blockBody.querySelector('.block-wiki-links');
+  if (!chipsMarkup) {
+    chipsEl?.remove();
+    return;
+  }
+  if (!chipsEl) {
+    input.insertAdjacentHTML('afterend', chipsMarkup);
+    return;
+  }
+  chipsEl.outerHTML = chipsMarkup;
+}
+
+function refreshBlockPreview(input) {
+  const blockBody = input.closest('.block-body');
+  if (!blockBody) return;
+  const previewEl = blockBody.querySelector('.block-preview');
+  if (!previewEl) return;
+  previewEl.innerHTML = renderInlineMarkdown(escapeHtml(input.value || ''));
 }
 
 function autoResize(el) {
@@ -402,14 +491,52 @@ function showToast(message) {
   showToast.timer = setTimeout(() => $('toast').classList.add('hidden'), 2600);
 }
 
+function isDesktopLayout() {
+  return window.matchMedia('(min-width: 860px)').matches;
+}
+
+function syncScrimVisibility() {
+  const showScrim = $('drawer').classList.contains('open') || $('blockActionSheet').classList.contains('open');
+  $('scrim').classList.toggle('hidden', !showScrim);
+}
+
 function openDrawer() {
+  closeBlockActionSheet();
   $('drawer').classList.add('open');
-  $('scrim').classList.remove('hidden');
+  syncScrimVisibility();
 }
 
 function closeDrawer() {
   $('drawer').classList.remove('open');
-  $('scrim').classList.add('hidden');
+  syncScrimVisibility();
+}
+
+function openBlockActionSheet(blockId) {
+  if (!blockId || isDesktopLayout()) return;
+  activeActionBlockId = blockId;
+  const sheet = $('blockActionSheet');
+  sheet.classList.remove('hidden');
+  sheet.setAttribute('aria-hidden', 'false');
+  requestAnimationFrame(() => sheet.classList.add('open'));
+  syncScrimVisibility();
+}
+
+function closeBlockActionSheet() {
+  activeActionBlockId = null;
+  const sheet = $('blockActionSheet');
+  sheet.classList.remove('open');
+  sheet.classList.add('hidden');
+  sheet.setAttribute('aria-hidden', 'true');
+  syncScrimVisibility();
+}
+
+function runBlockAction(action, blockId) {
+  if (!blockId) return;
+  if (action === 'after') addBlockAfter(blockId);
+  if (action === 'child') addChild(blockId);
+  if (action === 'delete') deleteBlock(blockId);
+  if (action === 'indent') indentBlock(blockId);
+  if (action === 'outdent') outdentBlock(blockId);
 }
 
 async function importFile(file) {
@@ -435,7 +562,11 @@ function wireEvents() {
   $('navToggle').addEventListener('click', openDrawer);
   $('bottomPagesBtn').addEventListener('click', openDrawer);
   $('drawerClose').addEventListener('click', closeDrawer);
-  $('scrim').addEventListener('click', closeDrawer);
+  $('blockActionSheetClose').addEventListener('click', closeBlockActionSheet);
+  $('scrim').addEventListener('click', () => {
+    closeDrawer();
+    closeBlockActionSheet();
+  });
   $('searchInput').addEventListener('input', renderSearch);
 
   $('pagesList').addEventListener('click', (event) => {
@@ -484,18 +615,44 @@ function wireEvents() {
     const found = findBlock(currentPage().blocks, input.dataset.editBlock);
     if (!found) return;
     found.block.text = input.value;
+    refreshBlockPreview(input);
+    refreshBlockWikiLinks(input);
     autoResize(input);
     queueSave();
   });
 
   $('blocks').addEventListener('click', (event) => {
+    const pageLink = event.target.closest('[data-open-page]');
+    if (pageLink) {
+      ensurePage(pageLink.dataset.openPage);
+      queueSave();
+      render();
+      return;
+    }
+    const openActions = event.target.closest('[data-open-actions]');
+    if (openActions) {
+      openBlockActionSheet(openActions.dataset.openActions);
+      return;
+    }
     const action = event.target.closest('button');
     if (!action) return;
-    if (action.dataset.addAfter) addBlockAfter(action.dataset.addAfter);
-    if (action.dataset.addChild) addChild(action.dataset.addChild);
-    if (action.dataset.delete) deleteBlock(action.dataset.delete);
-    if (action.dataset.indent) indentBlock(action.dataset.indent);
-    if (action.dataset.outdent) outdentBlock(action.dataset.outdent);
+    runBlockAction(
+      action.dataset.addAfter ? 'after' :
+        action.dataset.addChild ? 'child' :
+          action.dataset.delete ? 'delete' :
+            action.dataset.indent ? 'indent' :
+              action.dataset.outdent ? 'outdent' : '',
+      action.dataset.addAfter || action.dataset.addChild || action.dataset.delete || action.dataset.indent || action.dataset.outdent || ''
+    );
+  });
+
+  $('blockActionSheet').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-sheet-action]');
+    if (!button || !activeActionBlockId) return;
+    const action = button.dataset.sheetAction;
+    const blockId = activeActionBlockId;
+    closeBlockActionSheet();
+    runBlockAction(action, blockId);
   });
 
   $('blocks').addEventListener('keydown', (event) => {
@@ -512,6 +669,20 @@ function wireEvents() {
     }
   });
 
+  $('blocks').addEventListener('focusin', (event) => {
+    if (!event.target.closest('textarea[data-edit-block]')) return;
+    $('blocks').classList.add('is-typing');
+    closeBlockActionSheet();
+  });
+
+  $('blocks').addEventListener('focusout', () => {
+    requestAnimationFrame(() => {
+      const active = document.activeElement;
+      const stillTyping = Boolean(active && active.matches?.('textarea[data-edit-block]'));
+      $('blocks').classList.toggle('is-typing', stillTyping);
+    });
+  });
+
   $('addBlockBtn').addEventListener('click', () => {
     const page = currentPage();
     if (!page) return;
@@ -524,6 +695,13 @@ function wireEvents() {
   $('contextToggle').addEventListener('click', () => {
     const isCollapsed = $('backlinks').classList.toggle('collapsed');
     $('contextToggle').classList.toggle('open', !isCollapsed);
+  });
+  $('backlinks').addEventListener('click', (event) => {
+    const pageLink = event.target.closest('[data-open-page]');
+    if (!pageLink) return;
+    ensurePage(pageLink.dataset.openPage);
+    queueSave();
+    render();
   });
 
   // Inline new-page bar
@@ -622,6 +800,8 @@ const GRAPH = (() => {
   const DAMPING     = 0.82;
   const CENTER_PULL = 0.018;
   const TICK_LIMIT  = 600;   // stop sim after this many ticks with no drag
+  const MIN_SPEED   = 0.03;  // world-space px/frame below which nodes are considered settled
+  const STABLE_TICKS_TO_STOP = 24;
 
   // ---------- visual constants ----------
   const NODE_R_BASE   = 7;
@@ -665,6 +845,7 @@ const GRAPH = (() => {
   let width = 0, height = 0;
   let raf = null;
   let tickCount = 0;
+  let stableTicks = 0;
   let needsTick = true;
 
   // camera (pan + zoom)
@@ -694,6 +875,25 @@ const GRAPH = (() => {
   function dist(p1, p2) {
     const dx = p1.x - p2.x, dy = p1.y - p2.y;
     return Math.sqrt(dx * dx + dy * dy) || 0.001;
+  }
+
+  function fillRoundedRect(x, y, w, h, r) {
+    const radius = Math.max(0, Math.min(r, w / 2, h / 2));
+    ctx.beginPath();
+    if (typeof ctx.roundRect === 'function') {
+      ctx.roundRect(x, y, w, h, radius);
+    } else {
+      ctx.moveTo(x + radius, y);
+      ctx.lineTo(x + w - radius, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+      ctx.lineTo(x + w, y + h - radius);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+      ctx.lineTo(x + radius, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+      ctx.lineTo(x, y + radius);
+      ctx.quadraticCurveTo(x, y, x + radius, y);
+    }
+    ctx.fill();
   }
 
   function hitTest(wx, wy) {
@@ -758,6 +958,7 @@ const GRAPH = (() => {
 
     nodeCountEl.textContent = `${nodes.length} pages · ${edges.length} links`;
     tickCount = 0;
+    stableTicks = 0;
     needsTick = true;
   }
 
@@ -791,16 +992,25 @@ const GRAPH = (() => {
     }
 
     // centre pull + dampen + integrate
+    let maxSpeed = 0;
     for (const n of nodes) {
       if (n === dragging?.node) continue;
       n.vx = (n.vx - n.x * CENTER_PULL) * DAMPING;
       n.vy = (n.vy - n.y * CENTER_PULL) * DAMPING;
+      const speed = Math.hypot(n.vx, n.vy);
+      if (speed < MIN_SPEED) {
+        n.vx = 0;
+        n.vy = 0;
+      } else {
+        maxSpeed = Math.max(maxSpeed, speed);
+      }
       n.x += n.vx;
       n.y += n.vy;
     }
 
     tickCount++;
-    if (tickCount > TICK_LIMIT) needsTick = false;
+    stableTicks = maxSpeed < MIN_SPEED ? stableTicks + 1 : 0;
+    if (tickCount > TICK_LIMIT || stableTicks >= STABLE_TICKS_TO_STOP) needsTick = false;
   }
 
   // ---------- draw ----------
@@ -857,9 +1067,7 @@ const GRAPH = (() => {
 
       // label backdrop
       ctx.fillStyle = C.bgLabel;
-      ctx.beginPath();
-      ctx.roundRect(lx - 4, ly - 11, tw + 8, 15, 4);
-      ctx.fill();
+      fillRoundedRect(lx - 4, ly - 11, tw + 8, 15, 4);
 
       ctx.fillStyle = big ? C.labelBig : C.label;
       ctx.fillText(n.label, lx, ly);
@@ -887,10 +1095,11 @@ const GRAPH = (() => {
   function resize() {
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
-    width  = rect.width;
-    height = rect.height;
-    canvas.width  = width  * dpr;
-    canvas.height = height * dpr;
+    width = Math.max(1, Math.round(rect.width || canvas.clientWidth || 1));
+    height = Math.max(1, Math.round(rect.height || canvas.clientHeight || 1));
+    canvas.width = Math.max(1, Math.round(width * dpr));
+    canvas.height = Math.max(1, Math.round(height * dpr));
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.scale(dpr, dpr);
     needsTick = true;
   }
@@ -919,6 +1128,7 @@ const GRAPH = (() => {
       dragging.node.x = wp.x + dragging.ox;
       dragging.node.y = wp.y + dragging.oy;
       tickCount = 0;
+      stableTicks = 0;
       needsTick = true;
     } else if (panning) {
       camX = panning.startCamX + (sx - panning.startX);
@@ -1044,11 +1254,15 @@ const GRAPH = (() => {
     camX = 0; camY = 0; camZ = 1;
     hoveredNode = null;
     tooltip.classList.add('hidden');
-    resize();
-    buildGraph();
-    tickCount = 0;
-    needsTick = true;
-    startLoop();
+    requestAnimationFrame(() => {
+      if (overlay.classList.contains('hidden')) return;
+      resize();
+      buildGraph();
+      tickCount = 0;
+      stableTicks = 0;
+      needsTick = true;
+      startLoop();
+    });
     $('bottomGraphBtn').classList.add('active');
   }
 
@@ -1101,4 +1315,3 @@ async function bootstrap() {
 }
 
 bootstrap();
-
