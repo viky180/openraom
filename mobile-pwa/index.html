@@ -78,6 +78,24 @@
     </aside>
 
     <div id="scrim" class="scrim hidden"></div>
+    <section id="blockActionSheet" class="block-action-sheet hidden" aria-hidden="true">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <header class="sheet-head">
+        <strong>Block actions</strong>
+        <button id="blockActionSheetClose" class="icon-btn" type="button" aria-label="Close block actions">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </header>
+      <div class="sheet-actions">
+        <button type="button" data-sheet-action="after">After</button>
+        <button type="button" data-sheet-action="child">Child</button>
+        <button type="button" data-sheet-action="indent">Indent</button>
+        <button type="button" data-sheet-action="outdent">Outdent</button>
+        <button type="button" class="danger" data-sheet-action="delete">Delete</button>
+      </div>
+    </section>
 
     <!-- Main content -->
     <main class="workspace">
