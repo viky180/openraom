@@ -28,7 +28,13 @@ http://127.0.0.1:3100/mobile-pwa/index.html
 
 Mobile PWA installation and offline service workers require HTTPS, except on `localhost`.
 
-This repo includes a GitHub Pages workflow at `.github/workflows/pages.yml` that publishes only this `mobile-pwa` folder.
+This repo includes a GitHub Pages workflow at `.github/workflows/pages.yml` that publishes only this `mobile-pwa` folder to the `gh-pages` branch.
+
+In GitHub, set **Settings > Pages** to:
+
+- Source: **Deploy from a branch**
+- Branch: **gh-pages**
+- Folder: **/(root)**
 
 After the workflow finishes, open:
 

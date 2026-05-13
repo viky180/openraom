@@ -3,66 +3,93 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#0e1318" />
+  <meta name="theme-color" content="#f5f5f0" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0e1318" media="(prefers-color-scheme: dark)" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="Graph Notes" />
-  <title>Graph Notes Mobile</title>
+  <title>Graph Notes</title>
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
   <div class="app-shell">
+
+    <!-- Top bar -->
     <header class="topbar">
-      <button id="navToggle" class="icon-btn" type="button" aria-label="Open pages">☰</button>
-      <div class="brand">
-        <span class="brand-kicker">Offline graph</span>
-        <strong>Graph Notes</strong>
-      </div>
+      <button id="navToggle" class="icon-btn" type="button" aria-label="Open pages">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+        </svg>
+      </button>
+      <span id="topbarTitle" class="topbar-title">Graph Notes</span>
       <button id="installBtn" class="install-btn hidden" type="button">Install</button>
     </header>
 
-    <aside id="drawer" class="drawer" aria-label="Pages and tools">
+    <!-- Side drawer -->
+    <aside id="drawer" class="drawer" aria-label="Pages">
       <div class="drawer-head">
-        <div>
-          <span class="brand-kicker">Notebook</span>
-          <h1>Pages</h1>
+        <strong>Pages</strong>
+        <button id="drawerClose" class="icon-btn" type="button" aria-label="Close">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="drawer-body">
+        <!-- Search -->
+        <div class="search-wrap">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input id="searchInput" class="search-input" placeholder="Search pages &amp; blocks" autocomplete="off" />
         </div>
-        <button id="drawerClose" class="icon-btn" type="button" aria-label="Close pages">×</button>
-      </div>
+        <div id="searchResults" class="search-results"></div>
 
-      <label class="field-label" for="searchInput">Search</label>
-      <input id="searchInput" class="search-input" placeholder="Find pages or blocks" />
-      <div id="searchResults" class="search-results"></div>
+        <!-- Quick actions -->
+        <div class="quick-actions">
+          <button id="todayBtn" type="button">Today</button>
+          <button id="newPageBtn" type="button">+ New page</button>
+        </div>
 
-      <div class="quick-actions">
-        <button id="todayBtn" type="button">Today</button>
-        <button id="newPageBtn" type="button">New page</button>
-      </div>
+        <!-- Inline new-page input (hidden by default) -->
+        <div id="newPageBar" class="new-page-bar hidden">
+          <input id="newPageInput" type="text" placeholder="Page title…" autocomplete="off" />
+          <button id="newPageConfirm" type="button">Create</button>
+          <button id="newPageCancel" class="cancel" type="button">Cancel</button>
+        </div>
 
-      <div id="pagesList" class="pages-list"></div>
+        <div class="drawer-divider"></div>
 
-      <div class="drawer-tools">
-        <button id="importBtn" type="button">Import JSON</button>
-        <button id="exportBtn" type="button">Export JSON</button>
-        <button id="resetBtn" class="danger" type="button">Reset</button>
-        <input id="importFile" type="file" accept="application/json" hidden />
+        <!-- Pages list -->
+        <div id="pagesList" class="pages-list"></div>
+
+        <!-- Tools -->
+        <div class="drawer-tools">
+          <button id="importBtn" type="button">Import</button>
+          <button id="exportBtn" type="button">Export</button>
+          <button id="resetBtn" class="danger" type="button">Reset</button>
+          <input id="importFile" type="file" accept="application/json" hidden />
+        </div>
       </div>
     </aside>
 
     <div id="scrim" class="scrim hidden"></div>
 
+    <!-- Main content -->
     <main class="workspace">
       <section id="emptyState" class="empty-state hidden">
-        <p class="eyebrow">Ready for your Roam export</p>
-        <h2>Import your notes JSON and keep them on this phone.</h2>
-        <p>Everything is stored in this browser using local offline storage. No server account is required.</p>
-        <button id="emptyImportBtn" type="button">Import JSON</button>
+        <p class="eyebrow">Offline graph notes</p>
+        <h2>Your notes, always with you.</h2>
+        <p>Import a Roam JSON export to get started. Everything stays on this device — no account needed.</p>
+        <button id="emptyImportBtn" class="import-cta" type="button">Import JSON</button>
       </section>
 
       <section id="editor" class="editor">
-        <input id="pageTitle" class="page-title" aria-label="Page title" />
+        <input id="pageTitle" class="page-title" aria-label="Page title" placeholder="Untitled" />
         <div id="metaRow" class="meta-row"></div>
         <div id="blocks" class="blocks"></div>
         <button id="addBlockBtn" class="add-block" type="button">+ Add block</button>
@@ -74,12 +101,55 @@
       </section>
     </main>
 
-    <nav class="bottom-nav" aria-label="Primary actions">
-      <button id="bottomPagesBtn" type="button">Pages</button>
-      <button id="bottomTodayBtn" type="button">Today</button>
-      <button id="bottomAddBtn" type="button">Block</button>
-      <button id="bottomExportBtn" type="button">Export</button>
+    <!-- Bottom navigation (4 items) -->
+    <nav class="bottom-nav" aria-label="Primary navigation">
+      <button id="bottomPagesBtn" class="nav-btn" type="button">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+        </svg>
+        Pages
+      </button>
+      <button id="bottomTodayBtn" class="nav-btn" type="button">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+        </svg>
+        Today
+      </button>
+      <button id="bottomAddBtn" class="nav-btn add-action" type="button" aria-label="Add block">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+      </button>
+      <button id="bottomGraphBtn" class="nav-btn" type="button">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+          <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+        </svg>
+        Graph
+      </button>
+      <button id="bottomExportBtn" class="nav-btn" type="button">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        Export
+      </button>
     </nav>
+
+    <!-- Graph overlay -->
+    <div id="graphOverlay" class="graph-overlay hidden" role="dialog" aria-label="Graph view">
+      <header class="graph-header">
+        <span>Knowledge Graph</span>
+        <strong id="graphNodeCount"></strong>
+        <div class="spacer"></div>
+        <button id="graphClose" class="icon-btn" type="button" aria-label="Close graph">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </header>
+      <canvas id="graphCanvas"></canvas>
+      <div id="graphTooltip" class="graph-tooltip hidden"></div>
+    </div>
 
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   </div>

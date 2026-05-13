@@ -232,6 +232,13 @@ function render() {
   renderPages();
   renderEditor();
   renderBacklinks();
+  updateTopbarTitle();
+}
+
+function updateTopbarTitle() {
+  const titleEl = $('topbarTitle');
+  if (!titleEl) return;
+  titleEl.textContent = state.currentPage || 'Graph Notes';
 }
 
 function renderPages() {
@@ -253,6 +260,7 @@ function renderEditor() {
   $('metaRow').textContent = pageStats(page);
   $('blocks').innerHTML = page.blocks.map((block) => renderBlock(block, 0)).join('');
   document.querySelectorAll('.block textarea').forEach(autoResize);
+  updateTopbarTitle();
 }
 
 function renderBlock(block, depth) {
@@ -513,15 +521,36 @@ function wireEvents() {
   });
 
   $('bottomAddBtn').addEventListener('click', () => $('addBlockBtn').click());
-  $('contextToggle').addEventListener('click', () => $('backlinks').classList.toggle('collapsed'));
+  $('contextToggle').addEventListener('click', () => {
+    const isCollapsed = $('backlinks').classList.toggle('collapsed');
+    $('contextToggle').classList.toggle('open', !isCollapsed);
+  });
 
-  $('newPageBtn').addEventListener('click', () => {
-    const title = prompt('Page title');
-    if (!title) return;
+  // Inline new-page bar
+  function showNewPageBar() {
+    $('newPageBar').classList.remove('hidden');
+    $('newPageInput').value = '';
+    $('newPageInput').focus();
+  }
+  function hideNewPageBar() {
+    $('newPageBar').classList.add('hidden');
+    $('newPageInput').value = '';
+  }
+  function createNewPage() {
+    const title = $('newPageInput').value.trim();
+    if (!title) { hideNewPageBar(); return; }
     ensurePage(title);
     queueSave();
     render();
+    hideNewPageBar();
     closeDrawer();
+  }
+  $('newPageBtn').addEventListener('click', showNewPageBar);
+  $('newPageConfirm').addEventListener('click', createNewPage);
+  $('newPageCancel').addEventListener('click', hideNewPageBar);
+  $('newPageInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') createNewPage();
+    if (e.key === 'Escape') hideNewPageBar();
   });
 
   const openToday = () => {
@@ -534,7 +563,7 @@ function wireEvents() {
   $('bottomTodayBtn').addEventListener('click', openToday);
 
   $('importBtn').addEventListener('click', () => $('importFile').click());
-  $('emptyImportBtn').addEventListener('click', () => $('importFile').click());
+  $('emptyImportBtn')?.addEventListener('click', () => $('importFile').click());
   $('importFile').addEventListener('change', async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -581,11 +610,495 @@ async function registerServiceWorker() {
   }
 }
 
+// ═══════════════════════════════════════════════════════════
+//  GRAPH VIEW  –  force-directed canvas graph with touch/mouse
+// ═══════════════════════════════════════════════════════════
+
+const GRAPH = (() => {
+  // ---------- physics constants ----------
+  const REPULSION   = 6000;
+  const SPRING_LEN  = 110;
+  const SPRING_K    = 0.04;
+  const DAMPING     = 0.82;
+  const CENTER_PULL = 0.018;
+  const TICK_LIMIT  = 600;   // stop sim after this many ticks with no drag
+
+  // ---------- visual constants ----------
+  const NODE_R_BASE   = 7;
+  const NODE_R_SCALE  = 2.2;   // extra radius per extra link
+  const NODE_R_MAX    = 22;
+  const LABEL_FONT    = '500 11px "Aptos","Segoe UI",sans-serif';
+  const LABEL_FONT_BIG= '700 13px "Aptos","Segoe UI",sans-serif';
+
+  // Theme-aware graph colors — resolved at draw time so they update live
+  function graphColors() {
+    const isDark = document.documentElement.classList.contains('dark') ||
+      (!document.documentElement.classList.contains('light') &&
+        window.matchMedia('(prefers-color-scheme: dark)').matches);
+    return isDark ? {
+      node:    '#b7e6cc',
+      current: '#f0c36a',
+      orphan:  '#9eb0a8',
+      edge:    'rgba(183,230,204,0.18)',
+      edgeHi:  'rgba(183,230,204,0.55)',
+      glow:    'rgba(183,230,204,0.22)',
+      glowCur: 'rgba(240,195,106,0.25)',
+      bgLabel: 'rgba(10,13,17,0.82)',
+      label:   '#9eb0a8',
+      labelBig:'#f1f0e8',
+    } : {
+      node:    '#2d7a56',
+      current: '#b45e10',
+      orphan:  '#9ca3af',
+      edge:    'rgba(45,122,86,0.20)',
+      edgeHi:  'rgba(45,122,86,0.55)',
+      glow:    'rgba(45,122,86,0.18)',
+      glowCur: 'rgba(180,94,16,0.18)',
+      bgLabel: 'rgba(245,245,240,0.88)',
+      label:   '#6b7280',
+      labelBig:'#1a1a18',
+    };
+  }
+
+  let canvas, ctx, overlay, tooltip, nodeCountEl;
+  let nodes = [], edges = [];
+  let width = 0, height = 0;
+  let raf = null;
+  let tickCount = 0;
+  let needsTick = true;
+
+  // camera (pan + zoom)
+  let camX = 0, camY = 0, camZ = 1;
+
+  // interaction
+  let dragging = null;        // { node, ox, oy }
+  let panning  = null;        // { startX, startY, startCamX, startCamY }
+  let pinchDist0 = 0, pinchZ0 = 1;
+  let hoveredNode = null;
+  let tooltipTimer = null;
+
+  // ---------- helpers ----------
+  function screenToWorld(sx, sy) {
+    return { x: (sx - width / 2 - camX) / camZ, y: (sy - height / 2 - camY) / camZ };
+  }
+
+  function worldToScreen(wx, wy) {
+    return { x: wx * camZ + width / 2 + camX, y: wy * camZ + height / 2 + camY };
+  }
+
+  function nodeRadius(node) {
+    const r = NODE_R_BASE + Math.min(node.linkCount * NODE_R_SCALE, NODE_R_MAX - NODE_R_BASE);
+    return r;
+  }
+
+  function dist(p1, p2) {
+    const dx = p1.x - p2.x, dy = p1.y - p2.y;
+    return Math.sqrt(dx * dx + dy * dy) || 0.001;
+  }
+
+  function hitTest(wx, wy) {
+    for (let i = nodes.length - 1; i >= 0; i--) {
+      const n = nodes[i];
+      if (dist({ x: wx, y: wy }, n) <= nodeRadius(n) * 1.4) return n;
+    }
+    return null;
+  }
+
+  // ---------- build graph from state ----------
+  function buildGraph() {
+    nodes = [];
+    edges = [];
+
+    const pageKeys = Object.keys(state.pages);
+    if (!pageKeys.length) return;
+
+    // create nodes with random start positions in a circle
+    const angle = (2 * Math.PI) / pageKeys.length;
+    const initR  = Math.min(width, height) * 0.32;
+
+    const nodeMap = {};
+    pageKeys.forEach((title, i) => {
+      const node = {
+        id: title,
+        label: title,
+        x: Math.cos(angle * i) * initR,
+        y: Math.sin(angle * i) * initR,
+        vx: 0, vy: 0,
+        linkCount: 0,
+        isCurrent: title === state.currentPage
+      };
+      nodes.push(node);
+      nodeMap[title] = node;
+    });
+
+    // create edges from [[links]]
+    const linkRe = /\[\[([^\]]+)\]\]/g;
+    const edgeSet = new Set();
+
+    for (const [title, page] of Object.entries(state.pages)) {
+      const collectText = (blocks) => blocks?.forEach(b => {
+        const text = b.text || '';
+        let m;
+        while ((m = linkRe.exec(text)) !== null) {
+          const target = m[1];
+          if (nodeMap[target] && target !== title) {
+            const key = [title, target].sort().join('|||');
+            if (!edgeSet.has(key)) {
+              edgeSet.add(key);
+              edges.push({ source: nodeMap[title], target: nodeMap[target] });
+              nodeMap[title].linkCount++;
+              nodeMap[target].linkCount++;
+            }
+          }
+        }
+        if (b.children?.length) collectText(b.children);
+      });
+      collectText(page.blocks);
+    }
+
+    nodeCountEl.textContent = `${nodes.length} pages · ${edges.length} links`;
+    tickCount = 0;
+    needsTick = true;
+  }
+
+  // ---------- physics tick ----------
+  function tick() {
+    const len = nodes.length;
+    if (!len) return;
+
+    // repulsion
+    for (let i = 0; i < len; i++) {
+      for (let j = i + 1; j < len; j++) {
+        const a = nodes[i], b = nodes[j];
+        const dx = a.x - b.x, dy = a.y - b.y;
+        const d  = Math.sqrt(dx * dx + dy * dy) || 1;
+        const f  = REPULSION / (d * d);
+        const fx = (dx / d) * f, fy = (dy / d) * f;
+        a.vx += fx; a.vy += fy;
+        b.vx -= fx; b.vy -= fy;
+      }
+    }
+
+    // spring (edges)
+    for (const e of edges) {
+      const dx = e.target.x - e.source.x;
+      const dy = e.target.y - e.source.y;
+      const d  = Math.sqrt(dx * dx + dy * dy) || 1;
+      const f  = (d - SPRING_LEN) * SPRING_K;
+      const fx = (dx / d) * f, fy = (dy / d) * f;
+      e.source.vx += fx; e.source.vy += fy;
+      e.target.vx -= fx; e.target.vy -= fy;
+    }
+
+    // centre pull + dampen + integrate
+    for (const n of nodes) {
+      if (n === dragging?.node) continue;
+      n.vx = (n.vx - n.x * CENTER_PULL) * DAMPING;
+      n.vy = (n.vy - n.y * CENTER_PULL) * DAMPING;
+      n.x += n.vx;
+      n.y += n.vy;
+    }
+
+    tickCount++;
+    if (tickCount > TICK_LIMIT) needsTick = false;
+  }
+
+  // ---------- draw ----------
+  function draw() {
+    const C = graphColors();
+    ctx.clearRect(0, 0, width, height);
+
+    ctx.save();
+    ctx.translate(width / 2 + camX, height / 2 + camY);
+    ctx.scale(camZ, camZ);
+
+    // edges
+    const highlightEdges = hoveredNode
+      ? new Set(edges.filter(e => e.source === hoveredNode || e.target === hoveredNode))
+      : null;
+
+    for (const e of edges) {
+      const hi = highlightEdges?.has(e);
+      ctx.beginPath();
+      ctx.moveTo(e.source.x, e.source.y);
+      ctx.lineTo(e.target.x, e.target.y);
+      ctx.strokeStyle = hi ? C.edgeHi : C.edge;
+      ctx.lineWidth   = hi ? 1.5 : 0.9;
+      ctx.stroke();
+    }
+
+    // nodes
+    for (const n of nodes) {
+      const r     = nodeRadius(n);
+      const glow  = n.isCurrent ? C.glowCur : (n === hoveredNode ? C.glow : null);
+      const color = n.isCurrent ? C.current : (n.linkCount ? C.node : C.orphan);
+
+      // glow ring
+      if (glow) {
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, r + 7, 0, Math.PI * 2);
+        ctx.fillStyle = glow;
+        ctx.fill();
+      }
+
+      // circle
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+
+      // label (always shown, bigger when hovered or current)
+      const big    = n === hoveredNode || n.isCurrent;
+      const font   = big ? LABEL_FONT_BIG : LABEL_FONT;
+      ctx.font     = font;
+      const tw     = ctx.measureText(n.label).width;
+      const lx     = n.x - tw / 2;
+      const ly     = n.y + r + 14;
+
+      // label backdrop
+      ctx.fillStyle = C.bgLabel;
+      ctx.beginPath();
+      ctx.roundRect(lx - 4, ly - 11, tw + 8, 15, 4);
+      ctx.fill();
+
+      ctx.fillStyle = big ? C.labelBig : C.label;
+      ctx.fillText(n.label, lx, ly);
+    }
+
+    ctx.restore();
+  }
+
+  // ---------- loop ----------
+  function loop() {
+    if (needsTick || dragging) tick();
+    draw();
+    raf = requestAnimationFrame(loop);
+  }
+
+  function startLoop() {
+    if (!raf) raf = requestAnimationFrame(loop);
+  }
+
+  function stopLoop() {
+    if (raf) { cancelAnimationFrame(raf); raf = null; }
+  }
+
+  // ---------- resize ----------
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    width  = rect.width;
+    height = rect.height;
+    canvas.width  = width  * dpr;
+    canvas.height = height * dpr;
+    ctx.scale(dpr, dpr);
+    needsTick = true;
+  }
+
+  // ---------- pointer helpers ----------
+  function getPointerCanvas(e) {
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches?.[0] ?? e;
+    return { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
+  }
+
+  function pointerDown(sx, sy) {
+    const wp = screenToWorld(sx, sy);
+    const hit = hitTest(wp.x, wp.y);
+    if (hit) {
+      dragging = { node: hit, ox: hit.x - wp.x, oy: hit.y - wp.y };
+      hit.vx = 0; hit.vy = 0;
+    } else {
+      panning = { startX: sx, startY: sy, startCamX: camX, startCamY: camY };
+    }
+  }
+
+  function pointerMove(sx, sy) {
+    if (dragging) {
+      const wp = screenToWorld(sx, sy);
+      dragging.node.x = wp.x + dragging.ox;
+      dragging.node.y = wp.y + dragging.oy;
+      tickCount = 0;
+      needsTick = true;
+    } else if (panning) {
+      camX = panning.startCamX + (sx - panning.startX);
+      camY = panning.startCamY + (sy - panning.startY);
+    } else {
+      const wp = screenToWorld(sx, sy);
+      const hit = hitTest(wp.x, wp.y);
+      if (hit !== hoveredNode) {
+        hoveredNode = hit;
+        clearTimeout(tooltipTimer);
+        if (hit) {
+          tooltip.textContent = hit.label;
+          tooltip.classList.remove('hidden');
+        } else {
+          tooltip.classList.add('hidden');
+        }
+      }
+    }
+  }
+
+  function pointerUp(sx, sy, tapped) {
+    if (tapped && dragging) {
+      // it was a tap on a node → navigate
+      const wp = screenToWorld(sx, sy);
+      const hit = hitTest(wp.x, wp.y);
+      if (hit) navigateToNode(hit);
+    }
+    dragging = null;
+    panning  = null;
+  }
+
+  function navigateToNode(node) {
+    closeGraph();
+    state.currentPage = node.id;
+    queueSave();
+    render();
+    showToast(`Opened "${node.id}"`);
+  }
+
+  // ---------- touch handling ----------
+  let tapStart = null;
+
+  function onTouchStart(e) {
+    e.preventDefault();
+    if (e.touches.length === 2) {
+      // pinch start
+      dragging = null;
+      panning = null;
+      pinchDist0 = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      pinchZ0 = camZ;
+      return;
+    }
+    const { x, y } = getPointerCanvas(e);
+    tapStart = { x, y, t: Date.now() };
+    pointerDown(x, y);
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    if (e.touches.length === 2) {
+      const d = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      camZ = Math.max(0.25, Math.min(3, pinchZ0 * (d / pinchDist0)));
+      return;
+    }
+    const { x, y } = getPointerCanvas(e);
+    pointerMove(x, y);
+  }
+
+  function onTouchEnd(e) {
+    e.preventDefault();
+    if (tapStart) {
+      const dt = Date.now() - tapStart.t;
+      const { x, y } = getPointerCanvas({ touches: e.changedTouches });
+      const dx = Math.abs(x - tapStart.x), dy = Math.abs(y - tapStart.y);
+      const tapped = dt < 300 && dx < 8 && dy < 8;
+      pointerUp(tapStart.x, tapStart.y, tapped);
+      tapStart = null;
+    } else {
+      pointerUp(0, 0, false);
+    }
+  }
+
+  // ---------- mouse handling ----------
+  let mouseDownPos = null;
+
+  function onMouseDown(e) {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left, y = e.clientY - rect.top;
+    mouseDownPos = { x, y };
+    pointerDown(x, y);
+  }
+
+  function onMouseMove(e) {
+    const rect = canvas.getBoundingClientRect();
+    pointerMove(e.clientX - rect.left, e.clientY - rect.top);
+  }
+
+  function onMouseUp(e) {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left, y = e.clientY - rect.top;
+    const tapped = mouseDownPos
+      ? Math.hypot(x - mouseDownPos.x, y - mouseDownPos.y) < 5
+      : false;
+    mouseDownPos = null;
+    pointerUp(x, y, tapped);
+  }
+
+  function onWheel(e) {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.1 : 0.9;
+    camZ = Math.max(0.25, Math.min(3, camZ * factor));
+  }
+
+  // ---------- open / close ----------
+  function openGraph() {
+    overlay.classList.remove('hidden');
+    camX = 0; camY = 0; camZ = 1;
+    hoveredNode = null;
+    tooltip.classList.add('hidden');
+    resize();
+    buildGraph();
+    tickCount = 0;
+    needsTick = true;
+    startLoop();
+    $('bottomGraphBtn').classList.add('active');
+  }
+
+  function closeGraph() {
+    overlay.classList.add('hidden');
+    stopLoop();
+    $('bottomGraphBtn').classList.remove('active');
+  }
+
+  // ---------- init ----------
+  function init() {
+    canvas      = $('graphCanvas');
+    ctx         = canvas.getContext('2d');
+    overlay     = $('graphOverlay');
+    tooltip     = $('graphTooltip');
+    nodeCountEl = $('graphNodeCount');
+
+    // touch
+    canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+    canvas.addEventListener('touchmove',  onTouchMove,  { passive: false });
+    canvas.addEventListener('touchend',   onTouchEnd,   { passive: false });
+    canvas.addEventListener('touchcancel',() => { dragging=null; panning=null; tapStart=null; }, { passive: true });
+
+    // mouse
+    canvas.addEventListener('mousedown', onMouseDown);
+    canvas.addEventListener('mousemove', onMouseMove);
+    canvas.addEventListener('mouseup',   onMouseUp);
+    canvas.addEventListener('mouseleave',() => { hoveredNode=null; tooltip.classList.add('hidden'); });
+    canvas.addEventListener('wheel',     onWheel, { passive: false });
+
+    // resize
+    window.addEventListener('resize', () => { if (!overlay.classList.contains('hidden')) resize(); });
+
+    // close
+    $('graphClose').addEventListener('click', closeGraph);
+    $('bottomGraphBtn').addEventListener('click', openGraph);
+  }
+
+  return { init, openGraph, closeGraph };
+})();
+
+// ═══════════════════════════════════════════════════════════
+
 async function bootstrap() {
   wireEvents();
+  GRAPH.init();
   await registerServiceWorker();
   state = await loadStoredState();
   render();
 }
 
 bootstrap();
+
