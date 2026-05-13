@@ -292,7 +292,6 @@ function renderEditor() {
 }
 
 function renderBlock(block, depth) {
-  const wikiLinkChips = renderWikiLinkChips(block.text, block.id);
   const children = (block.children || []).map((child) => renderBlock(child, depth + 1)).join('');
   return `<article class="block" style="--depth:${depth}" data-block="${escapeHtml(block.id)}">
     <span class="bullet"></span>
@@ -300,7 +299,6 @@ function renderBlock(block, depth) {
       <button class="block-action-trigger" type="button" data-open-actions="${escapeHtml(block.id)}" aria-label="Block actions">⋯</button>
       <textarea rows="1" data-edit-block="${escapeHtml(block.id)}" aria-label="Block text">${escapeHtml(block.text)}</textarea>
       <div class="block-preview" data-preview-block="${escapeHtml(block.id)}">${renderInlineMarkdown(escapeHtml(block.text))}</div>
-      ${wikiLinkChips}
       <div class="block-actions">
         <button type="button" data-add-after="${escapeHtml(block.id)}">After</button>
         <button type="button" data-add-child="${escapeHtml(block.id)}">Child</button>
@@ -616,7 +614,6 @@ function wireEvents() {
     if (!found) return;
     found.block.text = input.value;
     refreshBlockPreview(input);
-    refreshBlockWikiLinks(input);
     autoResize(input);
     queueSave();
   });
@@ -794,14 +791,14 @@ async function registerServiceWorker() {
 
 const GRAPH = (() => {
   // ---------- physics constants ----------
-  const REPULSION   = 4500;
+  const REPULSION   = 3200;  // reduced to scatter less
   const SPRING_LEN  = 110;
-  const SPRING_K    = 0.04;
-  const DAMPING     = 0.88;   // higher = settles faster
-  const CENTER_PULL = 0.022;
-  const TICK_LIMIT  = 300;   // stop sim after this many ticks with no drag (~5 s @ 60 fps)
-  const MIN_SPEED   = 0.25;  // px/frame threshold — raised so sim stops sooner
-  const STABLE_TICKS_TO_STOP = 15;
+  const SPRING_K    = 0.035;
+  const DAMPING     = 0.82;   // lower = settles faster
+  const CENTER_PULL = 0.028;
+  const TICK_LIMIT  = 250;   // stop sim sooner
+  const MIN_SPEED   = 0.3;   // higher threshold = stops sooner
+  const STABLE_TICKS_TO_STOP = 20;
 
   // ---------- visual constants ----------
   const NODE_R_BASE   = 7;
@@ -847,6 +844,7 @@ const GRAPH = (() => {
   let tickCount = 0;
   let stableTicks = 0;
   let needsTick = true;
+  let positionCache = {};   // title -> {x, y} — persists across open/close
 
   // camera (pan + zoom)
   let camX = 0, camY = 0, camZ = 1;
@@ -912,17 +910,18 @@ const GRAPH = (() => {
     const pageKeys = Object.keys(state.pages);
     if (!pageKeys.length) return;
 
-    // create nodes with random start positions in a circle
-    const angle = (2 * Math.PI) / pageKeys.length;
-    const initR  = Math.min(width, height) * 0.32;
+    // create nodes — restore cached positions or place on circle
+    const angle = (2 * Math.PI) / Math.max(pageKeys.length, 1);
+    const initR  = Math.min(width, height) * 0.28;
 
     const nodeMap = {};
     pageKeys.forEach((title, i) => {
+      const cached = positionCache[title];
       const node = {
         id: title,
         label: title,
-        x: Math.cos(angle * i) * initR,
-        y: Math.sin(angle * i) * initR,
+        x: cached ? cached.x : Math.cos(angle * i) * initR + (Math.random() - 0.5) * 20,
+        y: cached ? cached.y : Math.sin(angle * i) * initR + (Math.random() - 0.5) * 20,
         vx: 0, vy: 0,
         linkCount: 0,
         isCurrent: title === state.currentPage
@@ -957,9 +956,15 @@ const GRAPH = (() => {
     }
 
     nodeCountEl.textContent = `${nodes.length} pages · ${edges.length} links`;
+    // Only do a fresh simulation if we have no cached positions
+    const hasCached = pageKeys.some(t => positionCache[t]);
     tickCount = 0;
     stableTicks = 0;
     needsTick = true;
+    // Pre-warm: run 60 ticks off-screen to arrive at a stable layout faster
+    if (!hasCached) {
+      for (let i = 0; i < 60; i++) tick();
+    }
   }
 
   // ---------- physics tick ----------
@@ -1079,6 +1084,10 @@ const GRAPH = (() => {
   // ---------- loop ----------
   function loop() {
     if (needsTick || dragging) tick();
+    // Cache current positions every frame so reopening restores them
+    if (nodes.length) {
+      for (const n of nodes) positionCache[n.id] = { x: n.x, y: n.y };
+    }
     draw();
     raf = requestAnimationFrame(loop);
   }
@@ -1101,7 +1110,8 @@ const GRAPH = (() => {
     canvas.height = Math.max(1, Math.round(height * dpr));
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.scale(dpr, dpr);
-    needsTick = true;
+    // Don't restart full simulation on resize if already settled
+    if (!needsTick) needsTick = false;
   }
 
   // ---------- pointer helpers ----------
@@ -1115,7 +1125,7 @@ const GRAPH = (() => {
     const wp = screenToWorld(sx, sy);
     const hit = hitTest(wp.x, wp.y);
     if (hit) {
-      dragging = { node: hit, ox: hit.x - wp.x, oy: hit.y - wp.y };
+      dragging = { node: hit, ox: hit.x - wp.x, oy: hit.y - wp.y, startSX: sx, startSY: sy, didDrag: false };
       hit.vx = 0; hit.vy = 0;
     } else {
       panning = { startX: sx, startY: sy, startCamX: camX, startCamY: camY };
@@ -1125,10 +1135,15 @@ const GRAPH = (() => {
   function pointerMove(sx, sy, isActualMove) {
     if (dragging) {
       const wp = screenToWorld(sx, sy);
+      // Check how far the pointer moved from drag start
+      const moveDistX = Math.abs(sx - (dragging.startSX ?? sx));
+      const moveDistY = Math.abs(sy - (dragging.startSY ?? sy));
+      const isRealDrag = moveDistX > 6 || moveDistY > 6;
       dragging.node.x = wp.x + dragging.ox;
       dragging.node.y = wp.y + dragging.oy;
-      // Only restart physics when the user is actively dragging a node (not on a tap)
-      if (isActualMove) {
+      // Only restart physics when the user is truly dragging, not on a micro-move tap
+      if (isActualMove && isRealDrag) {
+        dragging.didDrag = true;
         tickCount = 0;
         stableTicks = 0;
         needsTick = true;
@@ -1153,11 +1168,18 @@ const GRAPH = (() => {
   }
 
   function pointerUp(sx, sy, tapped) {
-    if (tapped && dragging) {
-      // it was a tap on a node → navigate
-      const wp = screenToWorld(sx, sy);
-      const hit = hitTest(wp.x, wp.y);
-      if (hit) navigateToNode(hit);
+    if (dragging) {
+      if (tapped || !dragging.didDrag) {
+        // it was a tap on a node → navigate; restore position so node doesn't scatter
+        const wp = screenToWorld(sx, sy);
+        const hit = hitTest(wp.x, wp.y);
+        if (hit) {
+          // snap node back to cached position to avoid drift
+          const cached = positionCache[hit.id];
+          if (cached && !dragging.didDrag) { hit.x = cached.x; hit.y = cached.y; }
+          navigateToNode(hit);
+        }
+      }
     }
     dragging = null;
     panning  = null;
@@ -1255,16 +1277,14 @@ const GRAPH = (() => {
   // ---------- open / close ----------
   function openGraph() {
     overlay.classList.remove('hidden');
-    camX = 0; camY = 0; camZ = 1;
+    // Only reset camera if this is the first open
+    if (!nodes.length) { camX = 0; camY = 0; camZ = 1; }
     hoveredNode = null;
     tooltip.classList.add('hidden');
     requestAnimationFrame(() => {
       if (overlay.classList.contains('hidden')) return;
       resize();
       buildGraph();
-      tickCount = 0;
-      stableTicks = 0;
-      needsTick = true;
       startLoop();
     });
     $('bottomGraphBtn').classList.add('active');
